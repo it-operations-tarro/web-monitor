@@ -72,11 +72,15 @@ export default function Dashboard() {
     document.documentElement.classList.toggle('light', newTheme === 'light');
   };
 
+  const getBaseUrl = () => {
+    const hostname = window.location.hostname;
+    return `http://${hostname}:4448`;
+  };
+
   async function fetchData() {
     setError(false);
     try {
-      const hostname = window.location.hostname;
-      const baseUrl = `http://${hostname}:4448`; 
+      const baseUrl = getBaseUrl();
       
       // 1. Define strict cache-busting options
       const fetchOpts = { cache: 'no-store' as RequestCache };
@@ -100,13 +104,13 @@ export default function Dashboard() {
     } finally {
       setLoading(false);
     }
-}
+  }
 
   async function handleDeleteMachine() {
     if (!machineToDelete) return;
     try {
-      const hostname = window.location.hostname;
-      const res = await fetch(`http://${hostname}:3001/api/machines/${encodeURIComponent(machineToDelete)}`, {
+      const baseUrl = getBaseUrl();
+      const res = await fetch(`${baseUrl}/api/machines/${encodeURIComponent(machineToDelete)}`, {
         method: 'DELETE'
       });
       if (res.ok) {
