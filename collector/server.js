@@ -171,6 +171,67 @@ app.delete('/api/machines/:id', (req, res) => {
 });
 
 /**
+ * Endpoint for the Enforcement tab — policy summary + top offenders.
+ * Returns a compact view of config.json (the full file is multi-MB) joined
+ * with violation aggregates from the logs table.
+ */
+app.get('/api/enforcement', (req, res) => {
+  const configPath = path.join(__dirname, 'config.json');
+
+  let config;
+  let lastSyncedAt = null;
+  try {
+    config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    lastSyncedAt = fs.statSync(configPath).mtime.toISOString();
+  } catch (e) {
+    return res.status(500).json({ error: 'Failed to read enforcement config' });
+  }
+
+  const categoryMap = config.category_map || {};
+  const blacklist = config.blacklist || [];
+
+  // Count domains per category from category_map
+  const categoryCounts = {};
+  for (const domain in categoryMap) {
+    const cat = categoryMap[domain];
+    categoryCounts[cat] = (categoryCounts[cat] || 0) + 1;
+  }
+
+  const summary = {
+    lastSyncedAt,
+    totalBlockedDomains: blacklist.length,
+    enabledCategories: config.categories || [],
+    categoryCounts,
+    manualBlacklist: config.manual_blacklist || []
+  };
+
+  db.serialize(() => {
+    db.all(`
+      SELECT domain, category, COUNT(*) as count
+      FROM logs
+      WHERE violation = 1
+      GROUP BY domain
+      ORDER BY count DESC
+      LIMIT 10
+    `, (err, topDomains) => {
+      summary.topOffendingDomains = topDomains || [];
+
+      db.all(`
+        SELECT username, machine_id, COUNT(*) as count
+        FROM logs
+        WHERE violation = 1 AND username IS NOT NULL
+        GROUP BY username
+        ORDER BY count DESC
+        LIMIT 10
+      `, (err, topUsers) => {
+        summary.topOffendingUsers = topUsers || [];
+        res.json(summary);
+      });
+    });
+  });
+});
+
+/**
  * Endpoint to serve global extension config
  */
 app.get('/api/config', (req, res) => {

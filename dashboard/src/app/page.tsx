@@ -1,18 +1,21 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { 
-  Activity, 
-  AlertTriangle, 
-  Monitor, 
-  Globe, 
-  Clock, 
+import {
+  Activity,
+  AlertTriangle,
+  Monitor,
+  Globe,
+  Clock,
   Search,
   RefreshCw,
   LayoutDashboard,
   Sun,
   Moon,
-  Trash2
+  Trash2,
+  ShieldCheck,
+  ListChecks,
+  Users
 } from 'lucide-react';
 import { 
   BarChart, 
@@ -46,11 +49,12 @@ const getCategoryInfo = (cat: string) => {
 };
 
 export default function Dashboard() {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'machines'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'machines' | 'enforcement'>('dashboard');
   const [stats, setStats] = useState<any>(null);
   const [logs, setLogs] = useState<any[]>([]);
   const [machines, setMachines] = useState<any[]>([]);
   const [bwViolations, setBwViolations] = useState<any[]>([]);
+  const [enforcement, setEnforcement] = useState<any>(null);
   const [machineToDelete, setMachineToDelete] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -90,12 +94,14 @@ export default function Dashboard() {
       const logsRes = await fetch(`${baseUrl}/api/logs?limit=50`, fetchOpts);
       const machinesRes = await fetch(`${baseUrl}/api/machines`, fetchOpts);
       const bwRes = await fetch(`${baseUrl}/api/bandwidth-violations?limit=10`, fetchOpts);
-      
-      if (statsRes.ok && logsRes.ok && machinesRes.ok && bwRes.ok) {
+      const enforcementRes = await fetch(`${baseUrl}/api/enforcement`, fetchOpts);
+
+      if (statsRes.ok && logsRes.ok && machinesRes.ok && bwRes.ok && enforcementRes.ok) {
         setStats(await statsRes.json());
         setLogs(await logsRes.json());
         setMachines(await machinesRes.json());
         setBwViolations(await bwRes.json());
+        setEnforcement(await enforcementRes.json());
       } else {
         setError(true);
       }
@@ -158,9 +164,12 @@ export default function Dashboard() {
           >
             <Activity size={20} className="transition-transform duration-300 group-hover:scale-110 group-hover:text-[var(--tarro-purple)]" /> Machine Status
           </button>
-          <a href="#" className="flex items-center gap-3 text-[var(--text-muted)] hover:text-[var(--text-main)] p-3 transition-colors group">
-            <AlertTriangle size={20} className="transition-transform duration-300 group-hover:scale-110 group-hover:text-[var(--tarro-purple)]" /> Enforcement
-          </a>
+          <button
+            onClick={() => setActiveTab('enforcement')}
+            className={`w-full flex items-center gap-3 p-3 rounded-xl font-medium transition-all group ${activeTab === 'enforcement' ? 'text-[#a78bfa] bg-[#6a29e1]/10 border-l-4 border-[#6a29e1]' : 'text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--bg-card-alt)]'}`}
+          >
+            <ShieldCheck size={20} className="transition-transform duration-300 group-hover:scale-110 group-hover:text-[var(--tarro-purple)]" /> Enforcement
+          </button>
         </nav>
       </aside>
 
@@ -169,10 +178,18 @@ export default function Dashboard() {
         <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-10">
           <div>
             <h2 className="text-3xl font-bold text-[var(--text-main)] mb-1">
-              {activeTab === 'dashboard' ? 'Network Activity Overview' : 'Workstation Fleet Status'}
+              {activeTab === 'dashboard'
+                ? 'Network Activity Overview'
+                : activeTab === 'machines'
+                ? 'Workstation Fleet Status'
+                : 'Enforcement Policy'}
             </h2>
             <p className="text-[var(--text-muted)]">
-              {activeTab === 'dashboard' ? 'Real-time surveillance monitoring from Central Server' : 'Real-time connectivity and agent status'}
+              {activeTab === 'dashboard'
+                ? 'Real-time surveillance monitoring from Central Server'
+                : activeTab === 'machines'
+                ? 'Real-time connectivity and agent status'
+                : 'Active blocklists, categories, and top policy offenders'}
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -427,8 +444,10 @@ export default function Dashboard() {
             </div>
 
           </>
-        ) : (
+        ) : activeTab === 'machines' ? (
           <MachineStatusView machines={machines} onDelete={setMachineToDelete} />
+        ) : (
+          <EnforcementView data={enforcement} />
         )}
 
         {/* Delete Confirmation Modal */}
@@ -538,6 +557,219 @@ function MachineStatusView({ machines, onDelete }: { machines: any[], onDelete: 
           )}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function EnforcementView({ data }: { data: any }) {
+  if (!data) {
+    return (
+      <div className="bg-[var(--bg-card)] rounded-2xl border border-[var(--border-ui)] p-10 text-center text-slate-500 italic">
+        Loading enforcement policy…
+      </div>
+    );
+  }
+
+  const {
+    lastSyncedAt,
+    totalBlockedDomains,
+    enabledCategories = [],
+    categoryCounts = {},
+    manualBlacklist = [],
+    topOffendingDomains = [],
+    topOffendingUsers = []
+  } = data;
+
+  const allCategories = ['social', 'gambling', 'streaming', 'ph_shopping', 'manual'];
+
+  return (
+    <div className="space-y-8">
+      {/* Top summary cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <StatCard
+          title="Blocked Domains"
+          value={totalBlockedDomains}
+          icon={<ShieldCheck className="text-[#a78bfa]" />}
+          color="brand"
+        />
+        <StatCard
+          title="Active Categories"
+          value={enabledCategories.length}
+          icon={<ListChecks className="text-[#34d399]" />}
+          color="teal"
+        />
+        <StatCard
+          title="Manual Entries"
+          value={manualBlacklist.length}
+          icon={<AlertTriangle className="text-red-400" />}
+          color="red"
+        />
+      </div>
+
+      {/* Category breakdown */}
+      <div className="bg-[var(--bg-card)] rounded-2xl border border-[var(--border-ui)] overflow-hidden transition-colors duration-300">
+        <div className="p-6 border-b border-[var(--border-ui)] bg-[var(--bg-card-alt)] flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-[#6a29e1] rounded-lg">
+              <ListChecks size={20} className="text-white" />
+            </div>
+            <h3 className="text-xl font-bold text-[var(--text-main)]">Category Policy</h3>
+          </div>
+          {lastSyncedAt && (
+            <span className="text-xs text-[var(--text-muted)] flex items-center gap-2">
+              <Clock size={12} /> Synced {format(new Date(lastSyncedAt), 'MMM dd, HH:mm')}
+            </span>
+          )}
+        </div>
+        <table className="w-full text-left border-collapse">
+          <thead>
+            <tr className="bg-[var(--bg-card-alt)] border-b border-[var(--border-ui)]">
+              <th className="p-4 text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider">Category</th>
+              <th className="p-4 text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider">Status</th>
+              <th className="p-4 text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider text-right">Domains</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-[var(--border-ui)]">
+            {allCategories.map((cat) => {
+              const info = getCategoryInfo(cat);
+              const isOn = cat === 'manual' ? manualBlacklist.length > 0 : enabledCategories.includes(cat);
+              const count = categoryCounts[cat] || 0;
+              return (
+                <tr key={cat} className="hover:bg-[var(--bg-card-alt)] transition-colors duration-200">
+                  <td className="p-4">
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${info.color}`}>
+                      {info.label}
+                    </span>
+                  </td>
+                  <td className="p-4">
+                    <div className="flex items-center gap-2">
+                      <div className={`w-2 h-2 rounded-full ${isOn ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-slate-600'}`} />
+                      <span className={`text-xs font-medium ${isOn ? 'text-emerald-400' : 'text-slate-500'}`}>
+                        {isOn ? 'Enforced' : 'Inactive'}
+                      </span>
+                    </div>
+                  </td>
+                  <td className="p-4 text-right">
+                    <span className="text-sm font-bold text-[var(--text-main)]">{count.toLocaleString()}</span>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Top offenders grid */}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
+        <div className="bg-[var(--bg-card)] rounded-2xl border border-[var(--border-ui)] overflow-hidden transition-colors duration-300">
+          <div className="p-6 border-b border-[var(--border-ui)] bg-[var(--bg-card-alt)] flex items-center gap-3">
+            <div className="p-2 bg-red-500 rounded-lg">
+              <Globe size={20} className="text-white" />
+            </div>
+            <h3 className="text-xl font-bold text-[var(--text-main)]">Top Offending Domains</h3>
+          </div>
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-[var(--bg-card-alt)] border-b border-[var(--border-ui)]">
+                <th className="p-4 text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider">Domain</th>
+                <th className="p-4 text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider">Category</th>
+                <th className="p-4 text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider text-right">Hits</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[var(--border-ui)]">
+              {topOffendingDomains.map((d: any) => {
+                const info = getCategoryInfo(d.category);
+                return (
+                  <tr key={d.domain} className="hover:bg-red-500/5 transition-colors duration-200">
+                    <td className="p-4 text-sm font-medium text-[var(--text-main)] truncate">{d.domain}</td>
+                    <td className="p-4">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${info.color}`}>
+                        {info.label}
+                      </span>
+                    </td>
+                    <td className="p-4 text-right">
+                      <span className="text-sm font-bold text-red-400">{d.count}</span>
+                    </td>
+                  </tr>
+                );
+              })}
+              {topOffendingDomains.length === 0 && (
+                <tr>
+                  <td colSpan={3} className="p-8 text-center text-slate-500 italic">
+                    No policy violations recorded yet.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="bg-[var(--bg-card)] rounded-2xl border border-[var(--border-ui)] overflow-hidden transition-colors duration-300">
+          <div className="p-6 border-b border-[var(--border-ui)] bg-[var(--bg-card-alt)] flex items-center gap-3">
+            <div className="p-2 bg-[#6a29e1] rounded-lg">
+              <Users size={20} className="text-white" />
+            </div>
+            <h3 className="text-xl font-bold text-[var(--text-main)]">Top Offending Agents</h3>
+          </div>
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-[var(--bg-card-alt)] border-b border-[var(--border-ui)]">
+                <th className="p-4 text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider">Agent</th>
+                <th className="p-4 text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider">Last Machine</th>
+                <th className="p-4 text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider text-right">Hits</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[var(--border-ui)]">
+              {topOffendingUsers.map((u: any) => (
+                <tr key={u.username} className="hover:bg-[var(--bg-card-alt)] transition-colors duration-200">
+                  <td className="p-4 text-sm text-[#a78bfa] font-medium truncate">{u.username}</td>
+                  <td className="p-4">
+                    <div className="flex items-center gap-2">
+                      <Monitor size={14} className="text-slate-500" />
+                      <span className="text-xs text-slate-300">{u.machine_id}</span>
+                    </div>
+                  </td>
+                  <td className="p-4 text-right">
+                    <span className="text-sm font-bold text-red-400">{u.count}</span>
+                  </td>
+                </tr>
+              ))}
+              {topOffendingUsers.length === 0 && (
+                <tr>
+                  <td colSpan={3} className="p-8 text-center text-slate-500 italic">
+                    No agent violations recorded yet.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Manual blacklist */}
+      <div className="bg-[var(--bg-card)] rounded-2xl border border-[var(--border-ui)] overflow-hidden transition-colors duration-300">
+        <div className="p-6 border-b border-[var(--border-ui)] bg-[var(--bg-card-alt)] flex items-center gap-3">
+          <div className="p-2 bg-slate-700 rounded-lg">
+            <AlertTriangle size={20} className="text-white" />
+          </div>
+          <h3 className="text-xl font-bold text-[var(--text-main)]">Manual Blacklist Entries</h3>
+        </div>
+        <div className="p-6">
+          {manualBlacklist.length === 0 ? (
+            <p className="text-sm text-slate-500 italic">
+              No manual entries. Add domains to <code className="text-[#a78bfa]">config.manual_blacklist</code> on the collector to enforce them across all agents.
+            </p>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {manualBlacklist.map((domain: string) => (
+                <span key={domain} className="px-3 py-1 bg-slate-500/10 border border-slate-500/30 rounded-md text-xs font-mono text-slate-300">
+                  {domain}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
