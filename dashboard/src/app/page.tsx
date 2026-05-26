@@ -94,17 +94,22 @@ export default function Dashboard() {
       const logsRes = await fetch(`${baseUrl}/api/logs?limit=50`, fetchOpts);
       const machinesRes = await fetch(`${baseUrl}/api/machines`, fetchOpts);
       const bwRes = await fetch(`${baseUrl}/api/bandwidth-violations?limit=10`, fetchOpts);
-      const enforcementRes = await fetch(`${baseUrl}/api/enforcement`, fetchOpts);
 
-      if (statsRes.ok && logsRes.ok && machinesRes.ok && bwRes.ok && enforcementRes.ok) {
+      if (statsRes.ok && logsRes.ok && machinesRes.ok && bwRes.ok) {
         setStats(await statsRes.json());
         setLogs(await logsRes.json());
         setMachines(await machinesRes.json());
         setBwViolations(await bwRes.json());
-        setEnforcement(await enforcementRes.json());
       } else {
         setError(true);
       }
+
+      // Enforcement is optional — if the collector hasn't been restarted with
+      // the new endpoint, the rest of the dashboard should still load.
+      try {
+        const enforcementRes = await fetch(`${baseUrl}/api/enforcement`, fetchOpts);
+        if (enforcementRes.ok) setEnforcement(await enforcementRes.json());
+      } catch {}
     } catch (e) {
       setError(true);
     } finally {
