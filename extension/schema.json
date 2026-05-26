@@ -1,0 +1,21 @@
+{
+  "type": "object",
+  "properties": {
+    "machineId": {
+      "type": "string",
+      "title": "Machine ID",
+      "description": "The unique identifier for this workstation (captured from OS hostname)."
+    },
+    "blacklist": {
+      "type": "array",
+      "items": { "type": "string" },
+      "title": "Blocked Domains",
+      "description": "List of domains to be restricted by IT policy."
+    },
+    "violationAction": {
+      "type": "string",
+      "title": "Violation Action",
+      "description": "Action to take when a violation occurs (alert, redirect, close)."
+    }
+  }
+}
