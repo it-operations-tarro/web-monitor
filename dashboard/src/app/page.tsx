@@ -1775,6 +1775,8 @@ function UserManagementTab({ getBaseUrl }: { getBaseUrl: () => string }) {
                 {expandedUser === user.id && (
                   <tr>
                     <td colSpan={6} className="bg-[var(--bg-card-alt)] border-b border-[var(--border-ui)] px-6 py-4">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex-1 min-w-0">
                       {user.role === 'team_lead' ? (
                         <div>
                           <div className="flex items-center justify-between mb-2">
@@ -1849,6 +1851,14 @@ function UserManagementTab({ getBaseUrl }: { getBaseUrl: () => string }) {
                           </div>
                         </div>
                       )}
+                        </div>
+                        <button
+                          onClick={() => setExpandedUser(null)}
+                          className="cursor-pointer flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--border-ui)] bg-[var(--bg-card)] text-xs font-semibold text-[var(--text-muted)] hover:text-[var(--text-main)] hover:border-[#6a29e1]/40 transition-all duration-150 shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#6a29e1]/50"
+                        >
+                          <X size={12} /> Done
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 )}
