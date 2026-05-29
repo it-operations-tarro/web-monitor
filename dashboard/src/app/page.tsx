@@ -48,13 +48,13 @@ const formatBytes = (bytes: number) => {
 
 type Tone = 'brand' | 'success' | 'warn' | 'danger' | 'info' | 'neutral';
 
-const TONE: Record<Tone, { dot: string; pill: string; text: string; bar: string }> = {
-  brand:   { dot: 'bg-[#a78bfa]',   pill: 'border-[#6a29e1]/40 bg-[#6a29e1]/10',     text: 'text-[#c4b5fd]',    bar: 'bg-[#6a29e1]' },
-  success: { dot: 'bg-emerald-400', pill: 'border-emerald-500/40 bg-emerald-500/10', text: 'text-emerald-300',  bar: 'bg-emerald-500' },
-  warn:    { dot: 'bg-amber-400',   pill: 'border-amber-500/40 bg-amber-500/10',     text: 'text-amber-300',    bar: 'bg-amber-500' },
-  danger:  { dot: 'bg-rose-400',    pill: 'border-rose-500/40 bg-rose-500/10',       text: 'text-rose-300',     bar: 'bg-rose-500' },
-  info:    { dot: 'bg-sky-400',     pill: 'border-sky-500/40 bg-sky-500/10',         text: 'text-sky-300',      bar: 'bg-sky-500' },
-  neutral: { dot: 'bg-slate-500',   pill: 'border-slate-500/30 bg-slate-500/10',     text: 'text-slate-300',    bar: 'bg-slate-500' },
+const TONE: Record<Tone, { dot: string; pill: string; text: string; bar: string; glow: string }> = {
+  brand:   { dot: 'bg-[#a78bfa]',   pill: 'border-[#6a29e1]/40 bg-[#6a29e1]/10',     text: 'text-[#c4b5fd]',   bar: 'bg-[#6a29e1]',     glow: 'shadow-[0_0_8px_rgba(106,41,225,0.4)]'  },
+  success: { dot: 'bg-emerald-400', pill: 'border-emerald-500/40 bg-emerald-500/10', text: 'text-emerald-300', bar: 'bg-emerald-500',   glow: 'shadow-[0_0_8px_rgba(52,211,153,0.4)]'  },
+  warn:    { dot: 'bg-amber-400',   pill: 'border-amber-500/40 bg-amber-500/10',     text: 'text-amber-300',   bar: 'bg-amber-500',     glow: 'shadow-[0_0_8px_rgba(245,158,11,0.4)]'  },
+  danger:  { dot: 'bg-rose-400',    pill: 'border-rose-500/40 bg-rose-500/10',       text: 'text-rose-300',    bar: 'bg-rose-500',      glow: 'shadow-[0_0_8px_rgba(239,68,68,0.4)]'   },
+  info:    { dot: 'bg-sky-400',     pill: 'border-sky-500/40 bg-sky-500/10',         text: 'text-sky-300',     bar: 'bg-sky-500',       glow: 'shadow-[0_0_8px_rgba(56,189,248,0.3)]'  },
+  neutral: { dot: 'bg-slate-500',   pill: 'border-slate-500/30 bg-slate-500/10',     text: 'text-slate-400',   bar: 'bg-slate-500',     glow: ''                                        },
 };
 
 const CATEGORY: Record<string, { label: string; tone: Tone }> = {
@@ -77,9 +77,10 @@ function StatusPill({
   className = '',
 }: { tone: Tone; label: string; pulse?: boolean; className?: string }) {
   const t = TONE[tone];
+  const showGlow = pulse && (tone === 'danger' || tone === 'success' || tone === 'warn');
   return (
-    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border text-[11px] font-medium ${t.pill} ${t.text} ${className}`}>
-      <span className={`w-1.5 h-1.5 rounded-full ${t.dot} ${pulse ? 'animate-pulse' : ''}`} />
+    <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border text-[11px] font-semibold tracking-wide transition-all duration-200 ${t.pill} ${t.text} ${showGlow ? t.glow : ''} ${className}`}>
+      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${t.dot} ${pulse ? 'animate-pulse' : ''}`} />
       {label}
     </span>
   );
@@ -89,7 +90,7 @@ function CategoryTag({ category }: { category: string }) {
   const info = getCategory(category);
   const t = TONE[info.tone];
   return (
-    <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide border ${t.pill} ${t.text}`}>
+    <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-widest border ${t.pill} ${t.text}`}>
       {info.label}
     </span>
   );
@@ -104,21 +105,24 @@ function Tile({
 }: { title: string; value: React.ReactNode; sub?: React.ReactNode; tone?: Tone; icon?: React.ReactNode }) {
   const t = TONE[tone];
   return (
-    <div className="relative bg-[var(--bg-card)] border border-[var(--border-ui)] rounded-lg p-5 transition-colors duration-200 hover:border-[#6a29e1]/60">
-      <span className={`absolute left-0 top-3 bottom-3 w-0.5 rounded-r ${t.bar}`} />
+    <div className="group relative bg-[var(--bg-card)] border border-[var(--border-ui)] rounded-xl p-5 transition-all duration-200 hover:border-[#6a29e1]/40 hover:shadow-lg hover:shadow-black/30 overflow-hidden cursor-default">
+      {/* Top accent line */}
+      <div className={`absolute top-0 left-0 right-0 h-[2px] ${t.bar} opacity-70`} />
+      {/* Subtle hover bg glow */}
+      <div className="absolute inset-0 bg-gradient-to-br from-[#6a29e1]/0 to-transparent opacity-0 group-hover:opacity-[0.04] transition-opacity duration-300 pointer-events-none" />
       <div className="flex items-start justify-between mb-3">
-        <span className="text-[11px] text-[var(--text-muted)] font-semibold uppercase tracking-wider">{title}</span>
-        {icon && <span className="text-[var(--text-muted)] opacity-70">{icon}</span>}
+        <span className="text-[10px] text-[var(--text-muted)] font-bold uppercase tracking-widest">{title}</span>
+        {icon && <span className={`${t.text} opacity-50 group-hover:opacity-80 transition-opacity duration-200`}>{icon}</span>}
       </div>
-      <div className="text-2xl font-semibold text-[var(--text-main)] tabular-nums tracking-tight">{value}</div>
-      {sub && <div className="mt-1 text-xs text-[var(--text-muted)]">{sub}</div>}
+      <div className="text-[26px] font-bold text-[var(--text-main)] tabular-nums tracking-tight font-[var(--font-geist-mono)]">{value}</div>
+      {sub && <div className="mt-1.5 text-[11px] text-[var(--text-muted)] leading-relaxed">{sub}</div>}
     </div>
   );
 }
 
 function Panel({ children, className = '' }: { children: React.ReactNode; className?: string }) {
   return (
-    <div className={`bg-[var(--bg-card)] border border-[var(--border-ui)] rounded-lg overflow-hidden ${className}`}>
+    <div className={`bg-[var(--bg-card)] border border-[var(--border-ui)] rounded-xl overflow-hidden shadow-sm shadow-black/20 ${className}`}>
       {children}
     </div>
   );
@@ -132,12 +136,12 @@ function PanelHeader({
 }: { title: string; accent?: Tone; subtitle?: string; right?: React.ReactNode }) {
   const t = TONE[accent];
   return (
-    <div className="px-5 py-3 border-b border-[var(--border-ui)] flex items-center justify-between gap-4">
+    <div className="px-5 py-3.5 border-b border-[var(--border-ui)] bg-[var(--bg-card-alt)]/50 flex items-center justify-between gap-4">
       <div className="flex items-center gap-3 min-w-0">
-        <span className={`w-1 h-4 rounded-sm ${t.bar}`} />
+        <span className={`w-[3px] h-5 rounded-full ${t.bar} shrink-0`} />
         <div className="min-w-0">
-          <h3 className="text-sm font-semibold text-[var(--text-main)] truncate">{title}</h3>
-          {subtitle && <p className="text-[11px] text-[var(--text-muted)] truncate">{subtitle}</p>}
+          <h3 className="text-sm font-semibold text-[var(--text-main)] tracking-tight truncate">{title}</h3>
+          {subtitle && <p className="text-[11px] text-[var(--text-muted)] truncate mt-0.5">{subtitle}</p>}
         </div>
       </div>
       {right}
@@ -154,15 +158,15 @@ function NavItem({
   return (
     <button
       onClick={onClick}
-      className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors border-l-2 ${
+      className={`cursor-pointer w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#6a29e1]/50 ${
         active
-          ? 'bg-[#6a29e1]/15 text-[var(--text-main)] border-[#6a29e1]'
-          : 'text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--bg-card-alt)] border-transparent'
+          ? 'bg-gradient-to-r from-[#6a29e1]/20 to-[#6a29e1]/5 text-[var(--text-main)] border border-[#6a29e1]/30 shadow-sm shadow-[#6a29e1]/10'
+          : 'text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--bg-card-alt)] border border-transparent'
       }`}
     >
-      <span className={active ? 'text-[#a78bfa]' : ''}>{icon}</span>
-      <span className="font-medium">{label}</span>
-      {active && <ChevronRight size={14} className="ml-auto text-[#a78bfa]" />}
+      <span className={`shrink-0 transition-colors ${active ? 'text-[#a78bfa]' : ''}`}>{icon}</span>
+      <span className="font-medium truncate">{label}</span>
+      {active && <ChevronRight size={13} className="ml-auto text-[#a78bfa] opacity-70 shrink-0" />}
     </button>
   );
 }
@@ -278,75 +282,60 @@ export default function Dashboard() {
     <div className="min-h-screen bg-[var(--bg-page)] text-[var(--text-main)] transition-colors duration-300">
       {/* ─── sidebar ─────────────────────────────────────────────────── */}
       <aside className="fixed left-0 top-0 h-full w-60 bg-[var(--bg-sidebar)] border-r border-[var(--border-ui)] hidden lg:flex flex-col transition-colors duration-300">
+        {/* Top purple glow line */}
+        <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#6a29e1]/70 to-transparent" />
+
         <div className="px-5 py-5 border-b border-[var(--border-ui)] flex items-center gap-3">
-          <img src="/logo.jpg" alt="Tarro" className="w-8 h-8 rounded-md object-cover ring-1 ring-[var(--border-ui)]" />
+          <div className="relative">
+            <img src="/logo.jpg" alt="Tarro" className="w-9 h-9 rounded-lg object-cover ring-1 ring-[#6a29e1]/40 shadow-md shadow-[#6a29e1]/20" />
+          </div>
           <div className="leading-tight">
-            <div className="text-sm font-semibold tracking-tight text-[var(--text-main)]">Tarro</div>
-            <div className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-muted)]">Web Monitor</div>
+            <div className="text-sm font-bold tracking-tight text-[var(--text-main)]">Tarro</div>
+            <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)] font-medium">Web Monitor</div>
           </div>
         </div>
 
-        <div className="px-3 py-4 flex-1">
-          <div className="px-2 mb-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Workspace</div>
-          <nav className="space-y-1">
-            <NavItem
-              active={activeTab === 'dashboard'}
-              onClick={() => setActiveTab('dashboard')}
-              icon={<LayoutDashboard size={16} />}
-              label="Overview"
-            />
-            <NavItem
-              active={activeTab === 'machines'}
-              onClick={() => setActiveTab('machines')}
-              icon={<Activity size={16} />}
-              label="Fleet"
-            />
-            <NavItem
-              active={activeTab === 'enforcement'}
-              onClick={() => setActiveTab('enforcement')}
-              icon={<ShieldCheck size={16} />}
-              label="Enforcement"
-            />
-            <NavItem
-              active={activeTab === 'users'}
-              onClick={() => setActiveTab('users')}
-              icon={<UserCog size={16} />}
-              label="Users"
-            />
+        <div className="px-3 py-4 flex-1 overflow-y-auto">
+          <div className="px-2 mb-2.5 text-[9px] font-bold uppercase tracking-[0.2em] text-[var(--text-muted)]/60">Workspace</div>
+          <nav className="space-y-0.5">
+            <NavItem active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} icon={<LayoutDashboard size={15} />} label="Overview" />
+            <NavItem active={activeTab === 'machines'}  onClick={() => setActiveTab('machines')}  icon={<Activity size={15} />}       label="Fleet" />
+            <NavItem active={activeTab === 'enforcement'} onClick={() => setActiveTab('enforcement')} icon={<ShieldCheck size={15} />} label="Enforcement" />
+            <NavItem active={activeTab === 'users'} onClick={() => setActiveTab('users')} icon={<UserCog size={15} />} label="Users" />
           </nav>
         </div>
 
-        <div className="px-5 py-3 border-t border-[var(--border-ui)] text-[10px] text-[var(--text-muted)] flex items-center justify-between">
-          <span>v1.0.1</span>
-          <StatusPill tone={error ? 'danger' : 'success'} label={error ? 'Offline' : 'Connected'} pulse={!error} />
+        <div className="px-4 py-3 border-t border-[var(--border-ui)] flex items-center justify-between">
+          <span className="text-[10px] text-[var(--text-muted)]/50 font-mono">v1.0.1</span>
+          <StatusPill tone={error ? 'danger' : 'success'} label={error ? 'Offline' : 'Live'} pulse={!error} />
         </div>
       </aside>
 
       {/* ─── main ───────────────────────────────────────────────────── */}
       <main className="lg:ml-60 px-6 lg:px-8 py-6">
         {/* topbar */}
-        <header className="flex flex-col md:flex-row md:items-end justify-between gap-3 mb-6">
+        <header className="flex flex-col md:flex-row md:items-end justify-between gap-3 mb-7">
           <div className="min-w-0">
-            <div className="flex items-center gap-2 text-[11px] text-[var(--text-muted)] uppercase tracking-wider font-semibold">
+            <div className="flex items-center gap-1.5 text-[10px] text-[var(--text-muted)] uppercase tracking-[0.15em] font-bold mb-1.5">
               <span>Workspace</span>
-              <ChevronRight size={12} className="opacity-60" />
-              <span className="text-[#c4b5fd]">{tabMeta.label}</span>
+              <ChevronRight size={11} className="opacity-50" />
+              <span className="text-[#a78bfa]">{tabMeta.label}</span>
             </div>
-            <h2 className="mt-1.5 text-xl font-semibold text-[var(--text-main)]">{tabMeta.title}</h2>
-            <p className="text-xs text-[var(--text-muted)] mt-0.5">{tabMeta.subtitle}</p>
+            <h2 className="text-[22px] font-bold text-[var(--text-main)] tracking-tight leading-tight">{tabMeta.title}</h2>
+            <p className="text-xs text-[var(--text-muted)] mt-1 leading-relaxed">{tabMeta.subtitle}</p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <StatusPill tone={error ? 'danger' : 'success'} label={error ? 'Collector unreachable' : 'Live · 10s'} pulse={!error} />
             <button
               onClick={toggleTheme}
-              className="p-1.5 rounded-md border border-[var(--border-ui)] bg-[var(--bg-card)] hover:bg-[var(--bg-card-alt)] transition-colors"
-              title="Toggle theme"
+              aria-label="Toggle theme"
+              className="cursor-pointer p-2 rounded-lg border border-[var(--border-ui)] bg-[var(--bg-card)] hover:bg-[var(--bg-card-alt)] hover:border-[#6a29e1]/40 transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#6a29e1]/50"
             >
-              {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
+              {theme === 'dark' ? <Sun size={13} /> : <Moon size={13} />}
             </button>
             <button
               onClick={fetchData}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-[var(--border-ui)] bg-[var(--bg-card)] text-xs font-medium hover:bg-[var(--bg-card-alt)] hover:border-[#6a29e1]/60 transition-colors"
+              className="cursor-pointer flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--border-ui)] bg-[var(--bg-card)] text-xs font-semibold hover:bg-[var(--bg-card-alt)] hover:border-[#6a29e1]/50 transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#6a29e1]/50"
             >
               <RefreshCw size={12} /> Refresh
             </button>
@@ -471,26 +460,26 @@ function OverviewTab({
 
       {/* bandwidth banner */}
       {highBandwidthMachines.length > 0 && (
-        <Panel className="border-amber-500/30">
+        <Panel className="border-amber-500/30 glow-warn">
           <PanelHeader
             accent="warn"
             title="High Bandwidth Utilization"
             subtitle={`${highBandwidthMachines.length} workstation${highBandwidthMachines.length === 1 ? '' : 's'} above 10 MB/min`}
-            right={<Gauge size={14} className="text-amber-300" />}
+            right={<Gauge size={14} className="text-amber-300 animate-pulse" />}
           />
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 p-3">
             {highBandwidthMachines.map((m) => (
-              <div key={`bw-${m.machine_id}`} className="bg-[var(--bg-card-alt)] border border-amber-500/20 rounded-md px-3 py-2.5">
-                <div className="flex justify-between items-center mb-1">
+              <div key={`bw-${m.machine_id}`} className="bg-amber-500/5 border border-amber-500/25 rounded-lg px-4 py-3 hover:bg-amber-500/10 transition-colors duration-150">
+                <div className="flex justify-between items-center mb-2">
                   <StatusPill tone="warn" label="Heavy" pulse />
-                  <span className="text-[10px] text-[var(--text-muted)] font-mono">
+                  <span className="text-[10px] text-[var(--text-muted)] font-[var(--font-geist-mono)]">
                     {format(new Date(m.last_seen), 'HH:mm')}
                   </span>
                 </div>
-                <div className="text-lg font-semibold text-[var(--text-main)] tabular-nums">{formatBytes(m.current_bandwidth)}/min</div>
-                <div className="mt-1 flex items-center gap-3 text-[11px] text-[var(--text-muted)] font-mono">
-                  <span>{m.machine_id}</span>
-                  <span className="text-[#c4b5fd]">{m.username || 'unknown_agent'}</span>
+                <div className="text-xl font-bold text-amber-300 tabular-nums font-[var(--font-geist-mono)]">{formatBytes(m.current_bandwidth)}<span className="text-sm font-medium text-amber-400/70">/min</span></div>
+                <div className="mt-1.5 flex items-center gap-2 text-[11px] text-[var(--text-muted)] font-[var(--font-geist-mono)]">
+                  <span className="truncate">{m.machine_id}</span>
+                  <span className="text-[#c4b5fd] shrink-0">{m.username || 'unknown'}</span>
                 </div>
               </div>
             ))}
@@ -500,26 +489,26 @@ function OverviewTab({
 
       {/* violation alerts */}
       {recentViolations.length > 0 && (
-        <Panel className="border-rose-500/30">
+        <Panel className="border-rose-500/30 glow-danger">
           <PanelHeader
             accent="danger"
             title="Active Violation Alerts"
             subtitle={`${recentViolations.length} most recent · ${logs.filter((l) => l.violation).length} total in feed`}
-            right={<AlertTriangle size={14} className="text-rose-300" />}
+            right={<AlertTriangle size={14} className="text-rose-300 animate-pulse" />}
           />
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 p-3">
             {recentViolations.map((alert) => (
-              <div key={alert.id} className="bg-[var(--bg-card-alt)] border border-rose-500/20 rounded-md px-3 py-2.5">
+              <div key={alert.id} className="bg-rose-500/5 border border-rose-500/20 rounded-lg px-4 py-3 hover:bg-rose-500/10 transition-colors duration-150">
                 <div className="flex justify-between items-center mb-1.5">
                   <CategoryTag category={alert.category} />
-                  <span className="text-[10px] text-[var(--text-muted)] font-mono">
+                  <span className="text-[10px] text-[var(--text-muted)] font-[var(--font-geist-mono)]">
                     {format(new Date(alert.timestamp), 'HH:mm')}
                   </span>
                 </div>
-                <div className="text-sm font-semibold text-[var(--text-main)] truncate">{alert.domain}</div>
-                <div className="mt-1 flex items-center gap-3 text-[11px] text-[var(--text-muted)] font-mono">
-                  <span>{alert.machine_id}</span>
-                  <span className="text-rose-300">{alert.username || 'unknown_agent'}</span>
+                <div className="text-sm font-bold text-[var(--text-main)] truncate">{alert.domain}</div>
+                <div className="mt-1.5 flex items-center gap-2 text-[11px] text-[var(--text-muted)] font-[var(--font-geist-mono)]">
+                  <span className="truncate">{alert.machine_id}</span>
+                  <span className="text-rose-300 shrink-0">{alert.username || 'unknown'}</span>
                 </div>
               </div>
             ))}

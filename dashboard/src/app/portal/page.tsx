@@ -39,13 +39,13 @@ const formatBytes = (bytes: number) => {
 
 type Tone = 'brand' | 'success' | 'warn' | 'danger' | 'info' | 'neutral';
 
-const TONE: Record<Tone, { dot: string; pill: string; text: string; bar: string }> = {
-  brand:   { dot: 'bg-[#a78bfa]',   pill: 'border-[#6a29e1]/40 bg-[#6a29e1]/10',     text: 'text-[#c4b5fd]',    bar: 'bg-[#6a29e1]' },
-  success: { dot: 'bg-emerald-400', pill: 'border-emerald-500/40 bg-emerald-500/10', text: 'text-emerald-300',  bar: 'bg-emerald-500' },
-  warn:    { dot: 'bg-amber-400',   pill: 'border-amber-500/40 bg-amber-500/10',     text: 'text-amber-300',    bar: 'bg-amber-500' },
-  danger:  { dot: 'bg-rose-400',    pill: 'border-rose-500/40 bg-rose-500/10',       text: 'text-rose-300',     bar: 'bg-rose-500' },
-  info:    { dot: 'bg-sky-400',     pill: 'border-sky-500/40 bg-sky-500/10',         text: 'text-sky-300',      bar: 'bg-sky-500' },
-  neutral: { dot: 'bg-slate-500',   pill: 'border-slate-500/30 bg-slate-500/10',     text: 'text-slate-300',    bar: 'bg-slate-500' },
+const TONE: Record<Tone, { dot: string; pill: string; text: string; bar: string; glow: string }> = {
+  brand:   { dot: 'bg-[#a78bfa]',   pill: 'border-[#6a29e1]/40 bg-[#6a29e1]/10',     text: 'text-[#c4b5fd]',   bar: 'bg-[#6a29e1]',   glow: 'shadow-[0_0_8px_rgba(106,41,225,0.4)]'  },
+  success: { dot: 'bg-emerald-400', pill: 'border-emerald-500/40 bg-emerald-500/10', text: 'text-emerald-300', bar: 'bg-emerald-500', glow: 'shadow-[0_0_8px_rgba(52,211,153,0.4)]'  },
+  warn:    { dot: 'bg-amber-400',   pill: 'border-amber-500/40 bg-amber-500/10',     text: 'text-amber-300',   bar: 'bg-amber-500',   glow: 'shadow-[0_0_8px_rgba(245,158,11,0.4)]'  },
+  danger:  { dot: 'bg-rose-400',    pill: 'border-rose-500/40 bg-rose-500/10',       text: 'text-rose-300',    bar: 'bg-rose-500',    glow: 'shadow-[0_0_8px_rgba(239,68,68,0.4)]'   },
+  info:    { dot: 'bg-sky-400',     pill: 'border-sky-500/40 bg-sky-500/10',         text: 'text-sky-300',     bar: 'bg-sky-500',     glow: 'shadow-[0_0_8px_rgba(56,189,248,0.3)]'  },
+  neutral: { dot: 'bg-slate-500',   pill: 'border-slate-500/30 bg-slate-500/10',     text: 'text-slate-400',   bar: 'bg-slate-500',   glow: ''                                        },
 };
 
 const CATEGORY: Record<string, { label: string; tone: Tone }> = {
@@ -69,9 +69,10 @@ const TD = 'px-4 py-3 text-sm';
 // ─── primitives ───────────────────────────────────────────────────────────
 function StatusPill({ tone, label, pulse = false }: { tone: Tone; label: string; pulse?: boolean }) {
   const t = TONE[tone];
+  const showGlow = pulse && (tone === 'danger' || tone === 'success' || tone === 'warn');
   return (
-    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border text-[11px] font-medium ${t.pill} ${t.text}`}>
-      <span className={`w-1.5 h-1.5 rounded-full ${t.dot} ${pulse ? 'animate-pulse' : ''}`} />
+    <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border text-[11px] font-semibold tracking-wide transition-all duration-200 ${t.pill} ${t.text} ${showGlow ? t.glow : ''}`}>
+      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${t.dot} ${pulse ? 'animate-pulse' : ''}`} />
       {label}
     </span>
   );
@@ -81,7 +82,7 @@ function CategoryTag({ category }: { category: string }) {
   const info = getCategory(category);
   const t = TONE[info.tone];
   return (
-    <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide border ${t.pill} ${t.text}`}>
+    <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-widest border ${t.pill} ${t.text}`}>
       {info.label}
     </span>
   );
@@ -90,21 +91,22 @@ function CategoryTag({ category }: { category: string }) {
 function Tile({ title, value, sub, tone = 'brand', icon }: { title: string; value: React.ReactNode; sub?: React.ReactNode; tone?: Tone; icon?: React.ReactNode }) {
   const t = TONE[tone];
   return (
-    <div className="relative bg-[var(--bg-card)] border border-[var(--border-ui)] rounded-lg p-5 hover:border-[#6a29e1]/60 transition-colors">
-      <span className={`absolute left-0 top-3 bottom-3 w-0.5 rounded-r ${t.bar}`} />
+    <div className="group relative bg-[var(--bg-card)] border border-[var(--border-ui)] rounded-xl p-5 transition-all duration-200 hover:border-[#6a29e1]/40 hover:shadow-lg hover:shadow-black/30 overflow-hidden cursor-default">
+      <div className={`absolute top-0 left-0 right-0 h-[2px] ${t.bar} opacity-70`} />
+      <div className="absolute inset-0 bg-gradient-to-br from-[#6a29e1]/0 to-transparent opacity-0 group-hover:opacity-[0.04] transition-opacity duration-300 pointer-events-none" />
       <div className="flex items-start justify-between mb-3">
-        <span className="text-[11px] text-[var(--text-muted)] font-semibold uppercase tracking-wider">{title}</span>
-        {icon && <span className="text-[var(--text-muted)] opacity-70">{icon}</span>}
+        <span className="text-[10px] text-[var(--text-muted)] font-bold uppercase tracking-widest">{title}</span>
+        {icon && <span className={`${t.text} opacity-50 group-hover:opacity-80 transition-opacity`}>{icon}</span>}
       </div>
-      <div className="text-2xl font-semibold text-[var(--text-main)] tabular-nums">{value}</div>
-      {sub && <div className="mt-1 text-xs text-[var(--text-muted)]">{sub}</div>}
+      <div className="text-[26px] font-bold text-[var(--text-main)] tabular-nums tracking-tight">{value}</div>
+      {sub && <div className="mt-1.5 text-[11px] text-[var(--text-muted)] leading-relaxed">{sub}</div>}
     </div>
   );
 }
 
 function Panel({ children, className = '' }: { children: React.ReactNode; className?: string }) {
   return (
-    <div className={`bg-[var(--bg-card)] border border-[var(--border-ui)] rounded-lg overflow-hidden ${className}`}>
+    <div className={`bg-[var(--bg-card)] border border-[var(--border-ui)] rounded-xl overflow-hidden shadow-sm shadow-black/20 ${className}`}>
       {children}
     </div>
   );
@@ -113,12 +115,12 @@ function Panel({ children, className = '' }: { children: React.ReactNode; classN
 function PanelHeader({ title, accent = 'brand', subtitle, right }: { title: string; accent?: Tone; subtitle?: string; right?: React.ReactNode }) {
   const t = TONE[accent];
   return (
-    <div className="px-5 py-3 border-b border-[var(--border-ui)] flex items-center justify-between gap-4">
+    <div className="px-5 py-3.5 border-b border-[var(--border-ui)] bg-[var(--bg-card-alt)]/50 flex items-center justify-between gap-4">
       <div className="flex items-center gap-3 min-w-0">
-        <span className={`w-1 h-4 rounded-sm ${t.bar}`} />
+        <span className={`w-[3px] h-5 rounded-full ${t.bar} shrink-0`} />
         <div className="min-w-0">
-          <h3 className="text-sm font-semibold text-[var(--text-main)] truncate">{title}</h3>
-          {subtitle && <p className="text-[11px] text-[var(--text-muted)] truncate">{subtitle}</p>}
+          <h3 className="text-sm font-semibold text-[var(--text-main)] tracking-tight truncate">{title}</h3>
+          {subtitle && <p className="text-[11px] text-[var(--text-muted)] truncate mt-0.5">{subtitle}</p>}
         </div>
       </div>
       {right}
@@ -161,22 +163,35 @@ function LoginForm({ onLogin }: { onLogin: (token: string, user: any) => void })
   };
 
   return (
-    <div className="min-h-screen bg-[var(--bg-page)] flex items-center justify-center px-4">
-      <div className="w-full max-w-sm">
+    <div className="min-h-screen bg-[var(--bg-page)] flex items-center justify-center px-4 relative overflow-hidden">
+      {/* Grid background */}
+      <div className="absolute inset-0 bg-[linear-gradient(rgba(106,41,225,0.04)_1px,transparent_1px),linear-gradient(90deg,rgba(106,41,225,0.04)_1px,transparent_1px)] bg-[size:44px_44px]" />
+      {/* Radial glow */}
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_60%_at_50%_40%,rgba(106,41,225,0.1)_0%,transparent_70%)]" />
+
+      <div className="relative w-full max-w-sm fade-in">
+        {/* Logo */}
         <div className="flex items-center gap-3 mb-8 justify-center">
-          <img src="/logo.jpg" alt="Tarro" className="w-9 h-9 rounded-md object-cover ring-1 ring-[var(--border-ui)]" />
+          <div className="relative">
+            <div className="absolute inset-0 rounded-xl bg-[#6a29e1]/30 blur-md" />
+            <img src="/logo.jpg" alt="Tarro" className="relative w-10 h-10 rounded-xl object-cover ring-1 ring-[#6a29e1]/50" />
+          </div>
           <div>
-            <div className="text-base font-semibold text-[var(--text-main)]">Tarro</div>
-            <div className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-muted)]">Team Portal</div>
+            <div className="text-base font-bold tracking-tight text-[var(--text-main)]">Tarro</div>
+            <div className="text-[10px] uppercase tracking-[0.2em] text-[var(--text-muted)] font-semibold">Team Portal</div>
           </div>
         </div>
 
-        <div className="bg-[var(--bg-card)] border border-[var(--border-ui)] rounded-xl p-7 shadow-2xl">
-          <h1 className="text-lg font-semibold text-[var(--text-main)] mb-1">Sign in</h1>
-          <p className="text-xs text-[var(--text-muted)] mb-6">Use the account created by your administrator.</p>
+        {/* Card */}
+        <div className="bg-[var(--bg-card)]/80 backdrop-blur-xl border border-[var(--border-ui)] rounded-2xl p-8 shadow-2xl shadow-black/50 ring-1 ring-[#6a29e1]/10">
+          {/* Top accent */}
+          <div className="absolute top-0 left-8 right-8 h-px bg-gradient-to-r from-transparent via-[#6a29e1]/50 to-transparent rounded-full" />
+
+          <h1 className="text-xl font-bold text-[var(--text-main)] tracking-tight mb-1">Sign in</h1>
+          <p className="text-xs text-[var(--text-muted)] mb-6 leading-relaxed">Use the account created by your administrator.</p>
 
           {error && (
-            <div className="mb-4 flex items-center gap-2 text-xs text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded-md px-3 py-2.5">
+            <div className="mb-5 flex items-center gap-2 text-xs text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded-xl px-3.5 py-3">
               <AlertTriangle size={13} className="shrink-0" />
               {error}
             </div>
@@ -184,26 +199,26 @@ function LoginForm({ onLogin }: { onLogin: (token: string, user: any) => void })
 
           <form onSubmit={submit} className="space-y-4">
             <div>
-              <label className="block text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1.5">Username</label>
+              <label className="block text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)] mb-1.5">Username</label>
               <input
                 autoFocus
-                className="w-full bg-[var(--bg-page)] border border-[var(--border-ui)] rounded-md px-3 py-2.5 text-sm text-[var(--text-main)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[#6a29e1]/60"
+                className="w-full bg-[var(--bg-page)]/80 border border-[var(--border-ui)] rounded-xl px-4 py-3 text-sm text-[var(--text-main)] placeholder-[var(--text-muted)]/50 focus:outline-none focus:border-[#6a29e1]/70 focus:ring-1 focus:ring-[#6a29e1]/30 transition-all duration-150"
                 placeholder="your.username"
                 value={username}
                 onChange={e => setUsername(e.target.value)}
               />
             </div>
             <div>
-              <label className="block text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1.5">Password</label>
+              <label className="block text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)] mb-1.5">Password</label>
               <div className="relative">
                 <input
                   type={showPw ? 'text' : 'password'}
-                  className="w-full bg-[var(--bg-page)] border border-[var(--border-ui)] rounded-md px-3 py-2.5 pr-10 text-sm text-[var(--text-main)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[#6a29e1]/60"
+                  className="w-full bg-[var(--bg-page)]/80 border border-[var(--border-ui)] rounded-xl px-4 py-3 pr-11 text-sm text-[var(--text-main)] placeholder-[var(--text-muted)]/50 focus:outline-none focus:border-[#6a29e1]/70 focus:ring-1 focus:ring-[#6a29e1]/30 transition-all duration-150"
                   placeholder="••••••••"
                   value={password}
                   onChange={e => setPassword(e.target.value)}
                 />
-                <button type="button" onClick={() => setShowPw(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-main)]">
+                <button type="button" aria-label="Toggle password visibility" onClick={() => setShowPw(v => !v)} className="cursor-pointer absolute right-3.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors">
                   {showPw ? <EyeOff size={14} /> : <Eye size={14} />}
                 </button>
               </div>
@@ -211,7 +226,7 @@ function LoginForm({ onLogin }: { onLogin: (token: string, user: any) => void })
             <button
               type="submit"
               disabled={loading || !username || !password}
-              className="w-full py-2.5 bg-[#6a29e1] hover:bg-[#7c3aed] disabled:opacity-50 text-white text-sm font-medium rounded-md transition-colors"
+              className="cursor-pointer w-full py-3 bg-[#6a29e1] hover:bg-[#7c3aed] disabled:opacity-40 text-white text-sm font-bold rounded-xl transition-all duration-150 shadow-lg shadow-[#6a29e1]/30 hover:shadow-[#6a29e1]/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#6a29e1]/70"
             >
               {loading ? 'Signing in…' : 'Sign in'}
             </button>
@@ -291,7 +306,8 @@ function PortalDashboard({ token, user, onLogout }: { token: string; user: any; 
   return (
     <div className="min-h-screen bg-[var(--bg-page)] text-[var(--text-main)] transition-colors duration-300">
       {/* topbar */}
-      <header className="sticky top-0 z-40 bg-[var(--bg-sidebar)] border-b border-[var(--border-ui)] px-6 py-3 flex items-center justify-between gap-4">
+      <header className="sticky top-0 z-40 bg-[var(--bg-sidebar)]/90 backdrop-blur-md border-b border-[var(--border-ui)] px-6 py-3 flex items-center justify-between gap-4">
+        <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#6a29e1]/50 to-transparent" />
         <div className="flex items-center gap-3">
           <img src="/logo.jpg" alt="Tarro" className="w-7 h-7 rounded object-cover ring-1 ring-[var(--border-ui)]" />
           <div className="leading-tight">
