@@ -1,0 +1,20 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!--
+  Chrome polls this file every ~5 hours to check for extension updates.
+  Increment the `version` attribute below whenever you publish a new .crx.
+  The version here MUST match the `version` field in the packed extension's
+  manifest.json, otherwise Chrome will not install the new build.
+
+  Substitutions required before going live:
+    YOUR_EXTENSION_ID  - 32-char ID Chrome assigns the first time you pack.
+                         Find it at chrome://extensions after loading unpacked.
+    YOUR_HTTPS_HOST    - public hostname serving this file over HTTPS.
+                         Plain HTTP will be rejected by ExtensionInstallForcelist.
+-->
+<gupdate xmlns='http://www.google.com/update2/response' protocol='2.0'>
+  <app appid='YOUR_EXTENSION_ID'>
+    <updatecheck
+      codebase='https://YOUR_HTTPS_HOST/updates/agent-monitor.crx'
+      version='1.1.1' />
+  </app>
+</gupdate>

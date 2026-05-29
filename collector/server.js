@@ -5,6 +5,16 @@ const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const fs = require('fs');
 const https = require('https');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  console.warn('⚠️  WARNING: JWT_SECRET is not set in your .env file.');
+  console.warn('   Anyone with access to the source code can forge portal login tokens.');
+  console.warn('   Add JWT_SECRET=<long-random-string> to collector/.env and restart.');
+  process.exit(1);
+}
 
 const app = express();
 const PORT = process.env.PORT || 4448;
@@ -12,6 +22,23 @@ const PORT = process.env.PORT || 4448;
 // Middleware
 app.use(cors());
 app.use(express.json());
+
+// Self-hosted extension distribution.
+// Serves the update manifest Chrome polls and the packed .crx.
+// Chrome REQUIRES HTTPS for these URLs in ExtensionInstallForcelist —
+// terminate TLS at a reverse proxy or run this server behind one.
+const updatesDir = path.join(__dirname, 'updates');
+if (!fs.existsSync(updatesDir)) fs.mkdirSync(updatesDir, { recursive: true });
+app.use('/updates', express.static(updatesDir, {
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('.crx')) {
+      res.setHeader('Content-Type', 'application/x-chrome-extension');
+    } else if (filePath.endsWith('.xml')) {
+      res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+    }
+    res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+  }
+}));
 
 // Database Setup
 const dbPath = path.join(__dirname, 'logs.db');
@@ -22,6 +49,11 @@ const db = new sqlite3.Database(dbPath, (err) => {
     console.log('Connected to the SQLite database.');
   }
 });
+
+// WAL mode — allows concurrent reads during writes, critical for 500+ agents
+db.run('PRAGMA journal_mode=WAL');
+db.run('PRAGMA busy_timeout=5000');   // wait up to 5s before failing on a locked write
+db.run('PRAGMA synchronous=NORMAL'); // faster fsync, still crash-safe
 
 // Initialize Tables
 db.serialize(() => {
@@ -65,6 +97,39 @@ db.serialize(() => {
   // Simple migration for existing databases
   db.run("ALTER TABLE machines ADD COLUMN current_bandwidth INTEGER DEFAULT 0", () => {});
   db.run("ALTER TABLE machines ADD COLUMN total_bandwidth INTEGER DEFAULT 0", () => {});
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS portal_users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      username TEXT UNIQUE NOT NULL,
+      email TEXT,
+      password_hash TEXT NOT NULL,
+      role TEXT NOT NULL CHECK(role IN ('team_lead','manager','director')),
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Team leads → machines they supervise
+  db.run(`
+    CREATE TABLE IF NOT EXISTS agent_assignments (
+      user_id INTEGER NOT NULL,
+      machine_id TEXT NOT NULL,
+      PRIMARY KEY(user_id, machine_id),
+      FOREIGN KEY(user_id) REFERENCES portal_users(id) ON DELETE CASCADE
+    )
+  `);
+
+  // manager→team_lead or director→manager relationships
+  db.run(`
+    CREATE TABLE IF NOT EXISTS user_assignments (
+      parent_id INTEGER NOT NULL,
+      child_id INTEGER NOT NULL,
+      PRIMARY KEY(parent_id, child_id),
+      FOREIGN KEY(parent_id) REFERENCES portal_users(id) ON DELETE CASCADE,
+      FOREIGN KEY(child_id) REFERENCES portal_users(id) ON DELETE CASCADE
+    )
+  `);
 });
 
 /**
@@ -298,6 +363,257 @@ app.get('/api/stats', (req, res) => {
       res.json(stats);
     });
   });
+});
+
+// ─── DB promise helpers ────────────────────────────────────────────────────
+function dbRun(sql, params = []) {
+  return new Promise((resolve, reject) =>
+    db.run(sql, params, function (err) { err ? reject(err) : resolve(this); })
+  );
+}
+function dbGet(sql, params = []) {
+  return new Promise((resolve, reject) =>
+    db.get(sql, params, (err, row) => (err ? reject(err) : resolve(row)))
+  );
+}
+function dbAll(sql, params = []) {
+  return new Promise((resolve, reject) =>
+    db.all(sql, params, (err, rows) => (err ? reject(err) : resolve(rows || [])))
+  );
+}
+
+// ─── Auth middleware ───────────────────────────────────────────────────────
+function requireAuth(req, res, next) {
+  const token = (req.headers.authorization || '').replace('Bearer ', '').trim();
+  if (!token) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    req.portalUser = jwt.verify(token, JWT_SECRET);
+    next();
+  } catch {
+    res.status(401).json({ error: 'Invalid or expired token' });
+  }
+}
+
+// ─── Portal auth ───────────────────────────────────────────────────────────
+app.post('/api/auth/login', async (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) return res.status(400).json({ error: 'Missing credentials' });
+  try {
+    const user = await dbGet('SELECT * FROM portal_users WHERE username = ?', [username]);
+    if (!user) return res.status(401).json({ error: 'Invalid credentials' });
+    const ok = await bcrypt.compare(password, user.password_hash);
+    if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
+    const token = jwt.sign({ id: user.id, username: user.username, name: user.name, role: user.role }, JWT_SECRET, { expiresIn: '12h' });
+    res.json({ token, user: { id: user.id, name: user.name, username: user.username, role: user.role } });
+  } catch (e) {
+    res.status(500).json({ error: 'Login failed' });
+  }
+});
+
+// ─── Portal user management (admin-side, no auth guard — admin UI is internal) ──
+app.get('/api/users', async (req, res) => {
+  try {
+    const users = await dbAll(`
+      SELECT id, name, username, email, role, created_at FROM portal_users ORDER BY created_at DESC
+    `);
+    // Attach assignment counts
+    for (const u of users) {
+      if (u.role === 'team_lead') {
+        const r = await dbGet('SELECT COUNT(*) as cnt FROM agent_assignments WHERE user_id = ?', [u.id]);
+        u.assignedCount = r?.cnt || 0;
+      } else {
+        const r = await dbGet('SELECT COUNT(*) as cnt FROM user_assignments WHERE parent_id = ?', [u.id]);
+        u.assignedCount = r?.cnt || 0;
+      }
+    }
+    res.json(users);
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to fetch users' });
+  }
+});
+
+app.post('/api/users', async (req, res) => {
+  const { name, username, email, password, role } = req.body;
+  if (!name || !username || !password || !role) return res.status(400).json({ error: 'Missing fields' });
+  if (!['team_lead', 'manager', 'director'].includes(role)) return res.status(400).json({ error: 'Invalid role' });
+  try {
+    const hash = await bcrypt.hash(password, 10);
+    const result = await dbRun(
+      'INSERT INTO portal_users (name, username, email, password_hash, role) VALUES (?, ?, ?, ?, ?)',
+      [name, username, email || null, hash, role]
+    );
+    res.status(201).json({ id: result.lastID, name, username, email, role });
+  } catch (e) {
+    if (e.message?.includes('UNIQUE')) return res.status(409).json({ error: 'Username already exists' });
+    res.status(500).json({ error: 'Failed to create user' });
+  }
+});
+
+app.delete('/api/users/:id', async (req, res) => {
+  try {
+    await dbRun('DELETE FROM portal_users WHERE id = ?', [req.params.id]);
+    res.json({ status: 'deleted' });
+  } catch {
+    res.status(500).json({ error: 'Failed to delete user' });
+  }
+});
+
+// Assign/unassign a machine to a team_lead
+app.post('/api/users/:id/agents', async (req, res) => {
+  const { machine_id } = req.body;
+  if (!machine_id) return res.status(400).json({ error: 'Missing machine_id' });
+  try {
+    await dbRun('INSERT OR IGNORE INTO agent_assignments (user_id, machine_id) VALUES (?, ?)', [req.params.id, machine_id]);
+    res.status(201).json({ status: 'assigned' });
+  } catch {
+    res.status(500).json({ error: 'Failed to assign agent' });
+  }
+});
+
+app.delete('/api/users/:id/agents/:machineId', async (req, res) => {
+  try {
+    await dbRun('DELETE FROM agent_assignments WHERE user_id = ? AND machine_id = ?', [req.params.id, req.params.machineId]);
+    res.json({ status: 'unassigned' });
+  } catch {
+    res.status(500).json({ error: 'Failed to unassign agent' });
+  }
+});
+
+app.get('/api/users/:id/agents', async (req, res) => {
+  try {
+    const rows = await dbAll('SELECT machine_id FROM agent_assignments WHERE user_id = ?', [req.params.id]);
+    res.json(rows.map(r => r.machine_id));
+  } catch {
+    res.status(500).json({ error: 'Failed to fetch agents' });
+  }
+});
+
+// Assign/unassign direct reports (TL→manager, manager→director)
+app.post('/api/users/:id/reports', async (req, res) => {
+  const { child_id } = req.body;
+  if (!child_id) return res.status(400).json({ error: 'Missing child_id' });
+  try {
+    await dbRun('INSERT OR IGNORE INTO user_assignments (parent_id, child_id) VALUES (?, ?)', [req.params.id, child_id]);
+    res.status(201).json({ status: 'assigned' });
+  } catch {
+    res.status(500).json({ error: 'Failed to assign report' });
+  }
+});
+
+app.delete('/api/users/:id/reports/:childId', async (req, res) => {
+  try {
+    await dbRun('DELETE FROM user_assignments WHERE parent_id = ? AND child_id = ?', [req.params.id, req.params.childId]);
+    res.json({ status: 'unassigned' });
+  } catch {
+    res.status(500).json({ error: 'Failed to unassign report' });
+  }
+});
+
+app.get('/api/users/:id/reports', async (req, res) => {
+  try {
+    const rows = await dbAll(`
+      SELECT pu.id, pu.name, pu.username, pu.role
+      FROM user_assignments ua
+      JOIN portal_users pu ON pu.id = ua.child_id
+      WHERE ua.parent_id = ?
+    `, [req.params.id]);
+    res.json(rows);
+  } catch {
+    res.status(500).json({ error: 'Failed to fetch reports' });
+  }
+});
+
+// ─── Portal dashboard (role-scoped data) ──────────────────────────────────
+async function getMachineIdsForUser(userId, role) {
+  if (role === 'team_lead') {
+    const rows = await dbAll('SELECT machine_id FROM agent_assignments WHERE user_id = ?', [userId]);
+    return rows.map(r => r.machine_id);
+  }
+
+  if (role === 'manager') {
+    const tls = await dbAll('SELECT child_id FROM user_assignments WHERE parent_id = ?', [userId]);
+    if (!tls.length) return [];
+    const tlIds = tls.map(t => t.child_id);
+    const agents = await dbAll(
+      `SELECT machine_id FROM agent_assignments WHERE user_id IN (${tlIds.map(() => '?').join(',')})`,
+      tlIds
+    );
+    return [...new Set(agents.map(a => a.machine_id))];
+  }
+
+  if (role === 'director') {
+    const managers = await dbAll('SELECT child_id FROM user_assignments WHERE parent_id = ?', [userId]);
+    if (!managers.length) return [];
+    const managerIds = managers.map(m => m.child_id);
+    const tls = await dbAll(
+      `SELECT child_id FROM user_assignments WHERE parent_id IN (${managerIds.map(() => '?').join(',')})`,
+      managerIds
+    );
+    if (!tls.length) return [];
+    const tlIds = tls.map(t => t.child_id);
+    const agents = await dbAll(
+      `SELECT machine_id FROM agent_assignments WHERE user_id IN (${tlIds.map(() => '?').join(',')})`,
+      tlIds
+    );
+    return [...new Set(agents.map(a => a.machine_id))];
+  }
+
+  return [];
+}
+
+app.get('/api/portal/dashboard', requireAuth, async (req, res) => {
+  const { id, role, name, username } = req.portalUser;
+  try {
+    const machineIds = await getMachineIdsForUser(id, role);
+
+    let violations = [], recentLogs = [], topDomains = [], bwViolations = [], teamMembers = [];
+
+    if (machineIds.length > 0) {
+      const placeholders = machineIds.map(() => '?').join(',');
+
+      violations = await dbAll(
+        `SELECT * FROM logs WHERE violation = 1 AND machine_id IN (${placeholders}) ORDER BY timestamp DESC LIMIT 20`,
+        machineIds
+      );
+
+      recentLogs = await dbAll(
+        `SELECT * FROM logs WHERE machine_id IN (${placeholders}) ORDER BY timestamp DESC LIMIT 50`,
+        machineIds
+      );
+
+      topDomains = await dbAll(
+        `SELECT domain, COUNT(*) as count FROM logs WHERE machine_id IN (${placeholders}) GROUP BY domain ORDER BY count DESC LIMIT 5`,
+        machineIds
+      );
+
+      bwViolations = await dbAll(
+        `SELECT * FROM bandwidth_violations WHERE machine_id IN (${placeholders}) ORDER BY timestamp DESC LIMIT 10`,
+        machineIds
+      );
+    }
+
+    // Fetch direct reports for managers/directors
+    if (role === 'manager' || role === 'director') {
+      teamMembers = await dbAll(`
+        SELECT pu.id, pu.name, pu.username, pu.role
+        FROM user_assignments ua JOIN portal_users pu ON pu.id = ua.child_id
+        WHERE ua.parent_id = ?
+      `, [id]);
+    }
+
+    res.json({
+      user: { id, name, username, role },
+      machineIds,
+      violations,
+      recentLogs,
+      topDomains,
+      bwViolations,
+      teamMembers,
+    });
+  } catch (e) {
+    console.error('[PORTAL]', e);
+    res.status(500).json({ error: 'Failed to fetch portal data' });
+  }
 });
 
 app.listen(PORT, '0.0.0.0', () => {

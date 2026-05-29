@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
 import {
   Activity,
   AlertTriangle,
@@ -18,6 +18,13 @@ import {
   Gauge,
   Radio,
   ChevronRight,
+  Plus,
+  X,
+  UserCog,
+  Link2,
+  Unlink,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import {
   BarChart,
@@ -162,7 +169,7 @@ function NavItem({
 
 // ─── page ─────────────────────────────────────────────────────────────────
 export default function Dashboard() {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'machines' | 'enforcement'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'machines' | 'enforcement' | 'users'>('dashboard');
   const [stats, setStats] = useState<any>(null);
   const [logs, setLogs] = useState<any[]>([]);
   const [machines, setMachines] = useState<any[]>([]);
@@ -253,6 +260,7 @@ export default function Dashboard() {
     dashboard:   { label: 'Overview',    title: 'Network Activity Overview',  subtitle: 'Real-time browsing surveillance from the collector' },
     machines:    { label: 'Fleet',       title: 'Workstation Fleet',          subtitle: 'Live agent connectivity and bandwidth' },
     enforcement: { label: 'Enforcement', title: 'Enforcement Policy',         subtitle: 'Active blocklists, categories, and top offenders' },
+    users:       { label: 'Users',       title: 'User & Agent Management',    subtitle: 'Create portal accounts and assign agents to team leads, managers, and directors' },
   }[activeTab];
 
   if (loading && !stats) {
@@ -298,6 +306,12 @@ export default function Dashboard() {
               onClick={() => setActiveTab('enforcement')}
               icon={<ShieldCheck size={16} />}
               label="Enforcement"
+            />
+            <NavItem
+              active={activeTab === 'users'}
+              onClick={() => setActiveTab('users')}
+              icon={<UserCog size={16} />}
+              label="Users"
             />
           </nav>
         </div>
@@ -358,6 +372,7 @@ export default function Dashboard() {
         )}
         {activeTab === 'machines' && <MachineStatusView machines={machines} onDelete={setMachineToDelete} />}
         {activeTab === 'enforcement' && <EnforcementView data={enforcement} />}
+        {activeTab === 'users' && <UserManagementTab getBaseUrl={getBaseUrl} machines={machines} />}
 
         {/* delete modal */}
         {machineToDelete && (
@@ -897,6 +912,368 @@ function EnforcementView({ data }: { data: any }) {
               ))}
             </div>
           )}
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
+// ─── role badge ───────────────────────────────────────────────────────────
+const ROLE_META: Record<string, { label: string; tone: Tone }> = {
+  team_lead: { label: 'Team Lead', tone: 'info' },
+  manager:   { label: 'Manager',   tone: 'warn' },
+  director:  { label: 'Director',  tone: 'brand' },
+};
+
+function RoleBadge({ role }: { role: string }) {
+  const meta = ROLE_META[role] || { label: role, tone: 'neutral' as Tone };
+  return <StatusPill tone={meta.tone} label={meta.label} />;
+}
+
+// ─── user management tab ──────────────────────────────────────────────────
+function UserManagementTab({ getBaseUrl, machines }: { getBaseUrl: () => string; machines: any[] }) {
+  const [users, setUsers] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ name: '', username: '', email: '', password: '', role: 'team_lead' });
+  const [showPw, setShowPw] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState('');
+  const [expandedUser, setExpandedUser] = useState<number | null>(null);
+  const [userAgents, setUserAgents] = useState<Record<number, string[]>>({});
+  const [userReports, setUserReports] = useState<Record<number, any[]>>({});
+  const [agentInput, setAgentInput] = useState('');
+  const [reportInput, setReportInput] = useState('');
+
+  const fetchUsers = useCallback(async () => {
+    try {
+      const res = await fetch(`${getBaseUrl()}/api/users`, { cache: 'no-store' });
+      if (res.ok) setUsers(await res.json());
+    } finally {
+      setLoading(false);
+    }
+  }, [getBaseUrl]);
+
+  useEffect(() => { fetchUsers(); }, [fetchUsers]);
+
+  const createUser = async () => {
+    setFormError('');
+    if (!form.name || !form.username || !form.password) { setFormError('Name, username, and password are required.'); return; }
+    setSaving(true);
+    try {
+      const res = await fetch(`${getBaseUrl()}/api/users`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
+      });
+      if (res.ok) {
+        setForm({ name: '', username: '', email: '', password: '', role: 'team_lead' });
+        setShowForm(false);
+        fetchUsers();
+      } else {
+        const data = await res.json();
+        setFormError(data.error || 'Failed to create user');
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deleteUser = async (id: number) => {
+    await fetch(`${getBaseUrl()}/api/users/${id}`, { method: 'DELETE' });
+    fetchUsers();
+  };
+
+  const refreshAgents = async (userId: number) => {
+    const res = await fetch(`${getBaseUrl()}/api/users/${userId}/agents`);
+    if (res.ok) { const data = await res.json(); setUserAgents(prev => ({ ...prev, [userId]: data })); }
+  };
+
+  const refreshReports = async (userId: number) => {
+    const res = await fetch(`${getBaseUrl()}/api/users/${userId}/reports`);
+    if (res.ok) { const data = await res.json(); setUserReports(prev => ({ ...prev, [userId]: data })); }
+  };
+
+  const expandUser = async (user: any) => {
+    if (expandedUser === user.id) { setExpandedUser(null); return; }
+    setExpandedUser(user.id);
+    if (user.role === 'team_lead') {
+      await refreshAgents(user.id);
+    } else {
+      await refreshReports(user.id);
+    }
+  };
+
+  const assignAgent = async (userId: number) => {
+    const mid = agentInput.trim();
+    if (!mid) return;
+    await fetch(`${getBaseUrl()}/api/users/${userId}/agents`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ machine_id: mid }),
+    });
+    setAgentInput('');
+    await refreshAgents(userId);
+    fetchUsers();
+  };
+
+  const unassignAgent = async (userId: number, machineId: string) => {
+    await fetch(`${getBaseUrl()}/api/users/${userId}/agents/${encodeURIComponent(machineId)}`, { method: 'DELETE' });
+    await refreshAgents(userId);
+    fetchUsers();
+  };
+
+  const assignReport = async (userId: number) => {
+    const childId = parseInt(reportInput.trim());
+    if (!childId) return;
+    await fetch(`${getBaseUrl()}/api/users/${userId}/reports`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ child_id: childId }),
+    });
+    setReportInput('');
+    await refreshReports(userId);
+    fetchUsers();
+  };
+
+  const unassignReport = async (userId: number, childId: number) => {
+    await fetch(`${getBaseUrl()}/api/users/${userId}/reports/${childId}`, { method: 'DELETE' });
+    await refreshReports(userId);
+    fetchUsers();
+  };
+
+  const teamLeads = users.filter(u => u.role === 'team_lead');
+  const managers = users.filter(u => u.role === 'manager');
+
+  return (
+    <div className="space-y-4">
+      {/* summary tiles */}
+      <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+        <Tile title="Total Portal Users" value={users.length} tone="brand" icon={<Users size={14} />} />
+        <Tile title="Team Leads" value={users.filter(u => u.role === 'team_lead').length} tone="info" />
+        <Tile title="Managers" value={users.filter(u => u.role === 'manager').length} tone="warn" />
+        <Tile title="Directors" value={users.filter(u => u.role === 'director').length} tone="brand" />
+      </div>
+
+      {/* create user panel */}
+      <Panel>
+        <PanelHeader
+          title="Portal Accounts"
+          subtitle="Team Leads, Managers, and Directors can log in at /portal"
+          right={
+            <button
+              onClick={() => { setShowForm(f => !f); setFormError(''); }}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-[#6a29e1] hover:bg-[#7c3aed] text-white transition-colors"
+            >
+              {showForm ? <X size={12} /> : <Plus size={12} />}
+              {showForm ? 'Cancel' : 'New User'}
+            </button>
+          }
+        />
+
+        {showForm && (
+          <div className="p-5 border-b border-[var(--border-ui)] bg-[var(--bg-card-alt)]">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 mb-3">
+              {[
+                { key: 'name', label: 'Full Name', placeholder: 'e.g. Juan dela Cruz' },
+                { key: 'username', label: 'Username', placeholder: 'e.g. jdelacruz' },
+                { key: 'email', label: 'Email (optional)', placeholder: 'e.g. juan@company.com' },
+              ].map(({ key, label, placeholder }) => (
+                <div key={key}>
+                  <label className="block text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">{label}</label>
+                  <input
+                    className="w-full bg-[var(--bg-card)] border border-[var(--border-ui)] rounded-md px-3 py-2 text-sm text-[var(--text-main)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[#6a29e1]/60"
+                    placeholder={placeholder}
+                    value={(form as any)[key]}
+                    onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
+                  />
+                </div>
+              ))}
+              <div>
+                <label className="block text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">Password</label>
+                <div className="relative">
+                  <input
+                    type={showPw ? 'text' : 'password'}
+                    className="w-full bg-[var(--bg-card)] border border-[var(--border-ui)] rounded-md px-3 py-2 pr-9 text-sm text-[var(--text-main)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[#6a29e1]/60"
+                    placeholder="Min 6 characters"
+                    value={form.password}
+                    onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPw(v => !v)}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-main)]"
+                  >
+                    {showPw ? <EyeOff size={13} /> : <Eye size={13} />}
+                  </button>
+                </div>
+              </div>
+              <div>
+                <label className="block text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">Role</label>
+                <select
+                  className="w-full bg-[var(--bg-card)] border border-[var(--border-ui)] rounded-md px-3 py-2 text-sm text-[var(--text-main)] focus:outline-none focus:border-[#6a29e1]/60"
+                  value={form.role}
+                  onChange={e => setForm(f => ({ ...f, role: e.target.value }))}
+                >
+                  <option value="team_lead">Team Lead</option>
+                  <option value="manager">Manager</option>
+                  <option value="director">Director</option>
+                </select>
+              </div>
+            </div>
+            {formError && <p className="text-xs text-rose-300 mb-3">{formError}</p>}
+            <button
+              onClick={createUser}
+              disabled={saving}
+              className="px-4 py-2 bg-[#6a29e1] hover:bg-[#7c3aed] disabled:opacity-50 text-white text-sm font-medium rounded-md transition-colors"
+            >
+              {saving ? 'Creating…' : 'Create Account'}
+            </button>
+          </div>
+        )}
+
+        {/* user table */}
+        <table className="w-full text-left border-collapse">
+          <thead>
+            <tr className="bg-[var(--bg-card-alt)] border-b border-[var(--border-ui)]">
+              <th className={TH}>Name</th>
+              <th className={TH}>Username</th>
+              <th className={TH}>Role</th>
+              <th className={TH}>Assignments</th>
+              <th className={TH}>Created</th>
+              <th className={`${TH} text-right`}>Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-[var(--border-ui)]">
+            {loading && (
+              <tr><td colSpan={6} className="px-4 py-8 text-center text-xs text-[var(--text-muted)] italic">Loading…</td></tr>
+            )}
+            {!loading && users.length === 0 && (
+              <tr><td colSpan={6} className="px-4 py-8 text-center text-xs text-[var(--text-muted)] italic">No portal accounts yet. Create one above.</td></tr>
+            )}
+            {users.map(user => (
+              <>
+                <tr key={user.id} className="hover:bg-[var(--bg-card-alt)] transition-colors group">
+                  <td className={TD}>
+                    <span className="font-medium text-[var(--text-main)] text-sm">{user.name}</span>
+                    {user.email && <div className="text-[11px] text-[var(--text-muted)]">{user.email}</div>}
+                  </td>
+                  <td className={TD}><span className="font-mono text-xs text-[#c4b5fd]">{user.username}</span></td>
+                  <td className={TD}><RoleBadge role={user.role} /></td>
+                  <td className={TD}>
+                    <span className="text-xs text-[var(--text-muted)]">
+                      {user.assignedCount}{' '}
+                      {user.role === 'team_lead' ? 'agent(s)' : user.role === 'manager' ? 'team lead(s)' : 'manager(s)'}
+                    </span>
+                  </td>
+                  <td className={`${TD} text-[var(--text-muted)] font-mono text-xs`}>
+                    {format(new Date(user.created_at), 'MMM dd, yyyy')}
+                  </td>
+                  <td className={`${TD} text-right`}>
+                    <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button
+                        onClick={() => expandUser(user)}
+                        className="p-1.5 text-[var(--text-muted)] hover:text-[#a78bfa] hover:bg-[#6a29e1]/10 rounded-md transition-colors"
+                        title="Manage assignments"
+                      >
+                        <Link2 size={13} />
+                      </button>
+                      <button
+                        onClick={() => deleteUser(user.id)}
+                        className="p-1.5 text-[var(--text-muted)] hover:text-rose-300 hover:bg-rose-500/10 rounded-md transition-colors"
+                        title="Delete account"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+
+                {/* expanded assignment row */}
+                {expandedUser === user.id && (
+                  <tr key={`${user.id}-expand`}>
+                    <td colSpan={6} className="bg-[var(--bg-card-alt)] border-b border-[var(--border-ui)] px-6 py-4">
+                      {user.role === 'team_lead' ? (
+                        <div>
+                          <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-2">Assigned Agents (Machines)</p>
+                          <div className="flex flex-wrap gap-1.5 mb-3">
+                            {(userAgents[user.id] || []).map(mid => (
+                              <span key={mid} className="flex items-center gap-1 px-2 py-0.5 bg-[var(--bg-card)] border border-[var(--border-ui)] rounded text-[11px] font-mono text-[var(--text-main)]">
+                                {mid}
+                                <button onClick={() => unassignAgent(user.id, mid)} className="ml-1 text-[var(--text-muted)] hover:text-rose-300">
+                                  <X size={11} />
+                                </button>
+                              </span>
+                            ))}
+                            {!(userAgents[user.id]?.length) && <span className="text-xs text-[var(--text-muted)] italic">No agents assigned.</span>}
+                          </div>
+                          <div className="flex gap-2">
+                            <select
+                              className="bg-[var(--bg-card)] border border-[var(--border-ui)] rounded-md px-3 py-1.5 text-sm text-[var(--text-main)] focus:outline-none focus:border-[#6a29e1]/60 flex-1 max-w-xs"
+                              value={agentInput}
+                              onChange={e => setAgentInput(e.target.value)}
+                            >
+                              <option value="">Select machine…</option>
+                              {machines.filter(m => !(userAgents[user.id] || []).includes(m.machine_id)).map(m => (
+                                <option key={m.machine_id} value={m.machine_id}>{m.machine_id} ({m.username || 'unknown'})</option>
+                              ))}
+                            </select>
+                            <button onClick={() => assignAgent(user.id)} className="px-3 py-1.5 bg-[#6a29e1] hover:bg-[#7c3aed] text-white text-xs font-medium rounded-md transition-colors">
+                              Assign
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div>
+                          <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-2">
+                            Assigned {user.role === 'manager' ? 'Team Leads' : 'Managers'}
+                          </p>
+                          <div className="flex flex-wrap gap-1.5 mb-3">
+                            {(userReports[user.id] || []).map((r: any) => (
+                              <span key={r.id} className="flex items-center gap-1.5 px-2 py-0.5 bg-[var(--bg-card)] border border-[var(--border-ui)] rounded text-[11px] text-[var(--text-main)]">
+                                <RoleBadge role={r.role} />
+                                <span className="font-mono text-[#c4b5fd]">{r.username}</span>
+                                <span>{r.name}</span>
+                                <button onClick={() => unassignReport(user.id, r.id)} className="ml-1 text-[var(--text-muted)] hover:text-rose-300">
+                                  <X size={11} />
+                                </button>
+                              </span>
+                            ))}
+                            {!(userReports[user.id]?.length) && <span className="text-xs text-[var(--text-muted)] italic">No reports assigned.</span>}
+                          </div>
+                          <div className="flex gap-2">
+                            <select
+                              className="bg-[var(--bg-card)] border border-[var(--border-ui)] rounded-md px-3 py-1.5 text-sm text-[var(--text-main)] focus:outline-none focus:border-[#6a29e1]/60 flex-1 max-w-xs"
+                              value={reportInput}
+                              onChange={e => setReportInput(e.target.value)}
+                            >
+                              <option value="">Select {user.role === 'manager' ? 'team lead' : 'manager'}…</option>
+                              {(user.role === 'manager' ? teamLeads : managers)
+                                .filter(u2 => !(userReports[user.id] || []).find((r: any) => r.id === u2.id))
+                                .map(u2 => (
+                                  <option key={u2.id} value={u2.id}>{u2.name} ({u2.username})</option>
+                                ))}
+                            </select>
+                            <button onClick={() => assignReport(user.id)} className="px-3 py-1.5 bg-[#6a29e1] hover:bg-[#7c3aed] text-white text-xs font-medium rounded-md transition-colors">
+                              Assign
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                )}
+              </>
+            ))}
+          </tbody>
+        </table>
+      </Panel>
+
+      {/* Portal access info */}
+      <Panel>
+        <PanelHeader accent="info" title="Portal Access" subtitle="Share this URL with your team" />
+        <div className="p-5 text-sm text-[var(--text-muted)]">
+          Team Leads, Managers, and Directors can log in at{' '}
+          <code className="font-mono text-[#c4b5fd] bg-[var(--bg-card-alt)] px-1.5 py-0.5 rounded">
+            {typeof window !== 'undefined' ? `${window.location.origin}/portal` : '/portal'}
+          </code>{' '}
+          using their assigned username and password. Each role sees only the agents and team members assigned to them.
         </div>
       </Panel>
     </div>
