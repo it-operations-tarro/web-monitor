@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useEffect, useMemo, useState, useCallback, Fragment } from 'react';
 import {
   Activity,
   AlertTriangle,
@@ -1180,8 +1180,8 @@ function UserManagementTab({ getBaseUrl, machines }: { getBaseUrl: () => string;
               <tr><td colSpan={6} className="px-4 py-8 text-center text-xs text-[var(--text-muted)] italic">No portal accounts yet. Create one above.</td></tr>
             )}
             {users.map(user => (
-              <>
-                <tr key={user.id} className="hover:bg-[var(--bg-card-alt)] transition-colors group">
+              <Fragment key={user.id}>
+                <tr className="hover:bg-[var(--bg-card-alt)] transition-colors group">
                   <td className={TD}>
                     <span className="font-medium text-[var(--text-main)] text-sm">{user.name}</span>
                     {user.email && <div className="text-[11px] text-[var(--text-muted)]">{user.email}</div>}
@@ -1226,7 +1226,7 @@ function UserManagementTab({ getBaseUrl, machines }: { getBaseUrl: () => string;
 
                 {/* expanded assignment row */}
                 {expandedUser === user.id && (
-                  <tr key={`${user.id}-expand`}>
+                  <tr>
                     <td colSpan={6} className="bg-[var(--bg-card-alt)] border-b border-[var(--border-ui)] px-6 py-4">
                       {user.role === 'team_lead' ? (
                         <div>
@@ -1298,7 +1298,7 @@ function UserManagementTab({ getBaseUrl, machines }: { getBaseUrl: () => string;
                     </td>
                   </tr>
                 )}
-              </>
+              </Fragment>
             ))}
           </tbody>
         </table>
