@@ -944,6 +944,12 @@ function UserManagementTab({ getBaseUrl, machines }: { getBaseUrl: () => string;
   const [userReports, setUserReports] = useState<Record<number, any[]>>({});
   const [agentInput, setAgentInput] = useState('');
   const [reportInput, setReportInput] = useState('');
+  const [resetTarget, setResetTarget] = useState<any>(null);
+  const [resetPassword, setResetPassword] = useState('');
+  const [resetShowPw, setResetShowPw] = useState(false);
+  const [resetError, setResetError] = useState('');
+  const [resetSaving, setResetSaving] = useState(false);
+  const [resetSuccess, setResetSuccess] = useState(false);
 
   const fetchUsers = useCallback(async () => {
     try {
@@ -971,9 +977,11 @@ function UserManagementTab({ getBaseUrl, machines }: { getBaseUrl: () => string;
         setShowForm(false);
         fetchUsers();
       } else {
-        const data = await res.json();
-        setFormError(data.error || 'Failed to create user');
+        const data = await res.json().catch(() => ({}));
+        setFormError(data.error || `Server returned ${res.status}`);
       }
+    } catch (e: any) {
+      setFormError('Could not reach the collector. Is it running on port 4448?');
     } finally {
       setSaving(false);
     }
@@ -1036,6 +1044,30 @@ function UserManagementTab({ getBaseUrl, machines }: { getBaseUrl: () => string;
     await fetch(`${getBaseUrl()}/api/users/${userId}/reports/${childId}`, { method: 'DELETE' });
     await refreshReports(userId);
     fetchUsers();
+  };
+
+  const doResetPassword = async () => {
+    setResetError('');
+    if (!resetPassword || resetPassword.length < 6) { setResetError('Password must be at least 6 characters.'); return; }
+    setResetSaving(true);
+    try {
+      const res = await fetch(`${getBaseUrl()}/api/users/${resetTarget.id}/reset-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newPassword: resetPassword }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setResetSuccess(true);
+        setResetPassword('');
+      } else {
+        setResetError(data.error || `Server returned ${res.status}`);
+      }
+    } catch {
+      setResetError('Could not reach the collector.');
+    } finally {
+      setResetSaving(false);
+    }
   };
 
   const teamLeads = users.filter(u => u.role === 'team_lead');
@@ -1175,6 +1207,13 @@ function UserManagementTab({ getBaseUrl, machines }: { getBaseUrl: () => string;
                         <Link2 size={13} />
                       </button>
                       <button
+                        onClick={() => { setResetTarget(user); setResetPassword(''); setResetError(''); setResetSuccess(false); }}
+                        className="p-1.5 text-[var(--text-muted)] hover:text-amber-300 hover:bg-amber-500/10 rounded-md transition-colors"
+                        title="Reset password"
+                      >
+                        <EyeOff size={13} />
+                      </button>
+                      <button
                         onClick={() => deleteUser(user.id)}
                         className="p-1.5 text-[var(--text-muted)] hover:text-rose-300 hover:bg-rose-500/10 rounded-md transition-colors"
                         title="Delete account"
@@ -1274,8 +1313,78 @@ function UserManagementTab({ getBaseUrl, machines }: { getBaseUrl: () => string;
             {typeof window !== 'undefined' ? `${window.location.origin}/portal` : '/portal'}
           </code>{' '}
           using their assigned username and password. Each role sees only the agents and team members assigned to them.
+          New accounts and reset accounts require the user to set a new password on first login.
         </div>
       </Panel>
+
+      {/* Reset password modal */}
+      {resetTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
+          <div className="bg-[var(--bg-card)] border border-[var(--border-ui)] rounded-lg p-6 max-w-md w-full shadow-2xl">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-2 bg-amber-500/15 border border-amber-500/30 rounded-md">
+                <EyeOff size={18} className="text-amber-300" />
+              </div>
+              <div>
+                <h3 className="text-base font-semibold text-[var(--text-main)]">Reset password</h3>
+                <p className="text-xs text-[var(--text-muted)]">
+                  <span className="font-mono text-[#c4b5fd]">{resetTarget.username}</span> · {resetTarget.name}
+                </p>
+              </div>
+            </div>
+
+            {resetSuccess ? (
+              <div className="mb-5">
+                <div className="flex items-center gap-2 text-sm text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 rounded-md px-3 py-2.5 mb-3">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                  Password reset successfully. The user will be prompted to set a new password on next login.
+                </div>
+              </div>
+            ) : (
+              <>
+                <p className="text-sm text-[var(--text-muted)] mb-4 leading-relaxed">
+                  Set a temporary password. The user will be forced to change it immediately on their next login.
+                </p>
+                {resetError && (
+                  <p className="text-xs text-rose-300 mb-3">{resetError}</p>
+                )}
+                <div className="relative mb-4">
+                  <input
+                    autoFocus
+                    type={resetShowPw ? 'text' : 'password'}
+                    className="w-full bg-[var(--bg-page)] border border-[var(--border-ui)] rounded-md px-3 py-2.5 pr-10 text-sm text-[var(--text-main)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[#6a29e1]/60"
+                    placeholder="Temporary password (min 6 chars)"
+                    value={resetPassword}
+                    onChange={e => setResetPassword(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && doResetPassword()}
+                  />
+                  <button type="button" onClick={() => setResetShowPw(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-main)]">
+                    {resetShowPw ? <Eye size={13} /> : <EyeOff size={13} />}
+                  </button>
+                </div>
+              </>
+            )}
+
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => { setResetTarget(null); setResetSuccess(false); }}
+                className="px-3 py-1.5 text-sm rounded-md border border-[var(--border-ui)] bg-[var(--bg-card-alt)] hover:bg-[var(--border-ui)] transition-colors"
+              >
+                {resetSuccess ? 'Close' : 'Cancel'}
+              </button>
+              {!resetSuccess && (
+                <button
+                  onClick={doResetPassword}
+                  disabled={resetSaving || !resetPassword}
+                  className="px-3 py-1.5 text-sm rounded-md bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white font-medium transition-colors"
+                >
+                  {resetSaving ? 'Resetting…' : 'Reset password'}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

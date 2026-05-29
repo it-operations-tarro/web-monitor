@@ -106,9 +106,13 @@ db.serialize(() => {
       email TEXT,
       password_hash TEXT NOT NULL,
       role TEXT NOT NULL CHECK(role IN ('team_lead','manager','director')),
+      must_change_password INTEGER NOT NULL DEFAULT 1,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
+
+  // Migration for existing portal_users rows
+  db.run("ALTER TABLE portal_users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 1", () => {});
 
   // Team leads → machines they supervise
   db.run(`
@@ -403,10 +407,62 @@ app.post('/api/auth/login', async (req, res) => {
     if (!user) return res.status(401).json({ error: 'Invalid credentials' });
     const ok = await bcrypt.compare(password, user.password_hash);
     if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
-    const token = jwt.sign({ id: user.id, username: user.username, name: user.name, role: user.role }, JWT_SECRET, { expiresIn: '12h' });
-    res.json({ token, user: { id: user.id, name: user.name, username: user.username, role: user.role } });
+    const mustChange = !!user.must_change_password;
+    const token = jwt.sign(
+      { id: user.id, username: user.username, name: user.name, role: user.role, mustChangePassword: mustChange },
+      JWT_SECRET,
+      { expiresIn: '12h' }
+    );
+    res.json({ token, user: { id: user.id, name: user.name, username: user.username, role: user.role, mustChangePassword: mustChange } });
   } catch (e) {
     res.status(500).json({ error: 'Login failed' });
+  }
+});
+
+// ─── Portal: change own password (requires auth) ──────────────────────────
+app.post('/api/portal/change-password', requireAuth, async (req, res) => {
+  const { currentPassword, newPassword } = req.body;
+  if (!newPassword || newPassword.length < 6) return res.status(400).json({ error: 'New password must be at least 6 characters' });
+  try {
+    const user = await dbGet('SELECT * FROM portal_users WHERE id = ?', [req.portalUser.id]);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    // Skip current password check only when must_change_password is set (first login / forced reset)
+    if (!user.must_change_password) {
+      if (!currentPassword) return res.status(400).json({ error: 'Current password is required' });
+      const ok = await bcrypt.compare(currentPassword, user.password_hash);
+      if (!ok) return res.status(401).json({ error: 'Current password is incorrect' });
+    }
+
+    const hash = await bcrypt.hash(newPassword, 10);
+    await dbRun('UPDATE portal_users SET password_hash = ?, must_change_password = 0 WHERE id = ?', [hash, user.id]);
+
+    // Issue a fresh token with mustChangePassword cleared
+    const token = jwt.sign(
+      { id: user.id, username: user.username, name: user.name, role: user.role, mustChangePassword: false },
+      JWT_SECRET,
+      { expiresIn: '12h' }
+    );
+    res.json({ token, user: { id: user.id, name: user.name, username: user.username, role: user.role, mustChangePassword: false } });
+  } catch {
+    res.status(500).json({ error: 'Failed to change password' });
+  }
+});
+
+// ─── Admin: reset a user's password ───────────────────────────────────────
+app.post('/api/users/:id/reset-password', async (req, res) => {
+  const { newPassword } = req.body;
+  if (!newPassword || newPassword.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  try {
+    const hash = await bcrypt.hash(newPassword, 10);
+    const result = await dbRun(
+      'UPDATE portal_users SET password_hash = ?, must_change_password = 1 WHERE id = ?',
+      [hash, req.params.id]
+    );
+    if (result.changes === 0) return res.status(404).json({ error: 'User not found' });
+    res.json({ status: 'reset', mustChangePassword: true });
+  } catch {
+    res.status(500).json({ error: 'Failed to reset password' });
   }
 });
 
