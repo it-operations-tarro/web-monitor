@@ -7,6 +7,30 @@ const fs = require('fs');
 const https = require('https');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const mysql = require('mysql2/promise');
+
+// ─── Floor Map DB (MariaDB) connection pool ────────────────────────────────
+let floorMapDb = null;
+
+async function getFloorMapDb() {
+  if (floorMapDb) return floorMapDb;
+  try {
+    floorMapDb = await mysql.createPool({
+      host:     process.env.FLOOR_MAP_DB_HOST || 'localhost',
+      port:     parseInt(process.env.FLOOR_MAP_DB_PORT) || 3306,
+      user:     process.env.FLOOR_MAP_DB_USER || 'root',
+      password: process.env.FLOOR_MAP_DB_PASS || '',
+      database: process.env.FLOOR_MAP_DB_NAME || 'floor_map_db_staging',
+      waitForConnections: true,
+      connectionLimit: 5,
+    });
+    console.log('[FloorMapDB] Connected to MariaDB employee directory.');
+  } catch (e) {
+    console.warn('[FloorMapDB] Could not connect:', e.message);
+    floorMapDb = null;
+  }
+  return floorMapDb;
+}
 
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) {
@@ -678,6 +702,79 @@ app.get('/api/users/unassigned-agents', async (req, res) => {
     res.json(rows);
   } catch {
     res.status(500).json({ error: 'Failed to fetch unassigned agents' });
+  }
+});
+
+// Import direct reports from the org directory for a Team Lead
+// Looks up the TL's work email in floor_map_db employees, finds their Full-Time reports
+app.get('/api/users/:id/org-reports', async (req, res) => {
+  try {
+    // 1. Get the Team Lead's email from portal_users
+    const tlUser = await dbGet('SELECT username, email, role FROM portal_users WHERE id = ?', [req.params.id]);
+    if (!tlUser) return res.status(404).json({ error: 'User not found' });
+    if (tlUser.role !== 'team_lead') return res.status(400).json({ error: 'Only Team Leads can import org reports' });
+
+    const tlEmail = (tlUser.email || tlUser.username || '').toLowerCase().trim();
+    if (!tlEmail) return res.status(400).json({ error: 'Team Lead has no email set' });
+
+    // 2. Connect to MariaDB
+    const db = await getFloorMapDb();
+    if (!db) return res.status(503).json({ error: 'Cannot connect to employee directory. Check FLOOR_MAP_DB_* settings in .env' });
+
+    // 3. Find TL's full display name from the org DB by matching their work email
+    const [tlRows] = await db.query(
+      `SELECT JSON_UNQUOTE(JSON_EXTRACT(fields, '$."First Name"')) AS first_name,
+              JSON_UNQUOTE(JSON_EXTRACT(fields, '$."Last Name"'))  AS last_name,
+              JSON_UNQUOTE(JSON_EXTRACT(fields, '$."Work Email"')) AS work_email
+       FROM employees
+       WHERE LOWER(JSON_UNQUOTE(JSON_EXTRACT(fields, '$."Work Email"'))) = ?
+       LIMIT 1`,
+      [tlEmail]
+    );
+
+    if (!tlRows.length) {
+      return res.status(404).json({
+        error: `No employee record found for email "${tlEmail}" in the org directory. Make sure the Team Lead's email matches their work email in the employee database.`
+      });
+    }
+
+    const tlFirstName = tlRows[0].first_name || '';
+    const tlLastName  = tlRows[0].last_name  || '';
+    const tlFullName  = `${tlFirstName} ${tlLastName}`.trim();
+
+    if (!tlFullName) return res.status(404).json({ error: 'Could not determine Team Lead full name from org directory' });
+
+    // 4. Find all Full-Time employees reporting to this Team Lead
+    const [empRows] = await db.query(
+      `SELECT JSON_UNQUOTE(JSON_EXTRACT(fields, '$."Work Email"'))  AS work_email,
+              JSON_UNQUOTE(JSON_EXTRACT(fields, '$."First Name"'))  AS first_name,
+              JSON_UNQUOTE(JSON_EXTRACT(fields, '$."Last Name"'))   AS last_name,
+              JSON_UNQUOTE(JSON_EXTRACT(fields, '$."Job Title"'))   AS job_title,
+              JSON_UNQUOTE(JSON_EXTRACT(fields, '$."Department"'))  AS department
+       FROM employees
+       WHERE JSON_UNQUOTE(JSON_EXTRACT(fields, '$."Reporting to"'))  = ?
+         AND JSON_UNQUOTE(JSON_EXTRACT(fields, '$."Employment Status"')) = 'Full-Time'
+         AND JSON_UNQUOTE(JSON_EXTRACT(fields, '$."Work Email"')) IS NOT NULL
+         AND JSON_UNQUOTE(JSON_EXTRACT(fields, '$."Work Email"')) != 'null'
+         AND JSON_UNQUOTE(JSON_EXTRACT(fields, '$."Work Email"')) != ''
+       ORDER BY last_name, first_name`,
+      [tlFullName]
+    );
+
+    res.json({
+      tlEmail,
+      tlFullName,
+      employees: empRows.map(r => ({
+        work_email:  (r.work_email || '').toLowerCase().trim(),
+        first_name:  r.first_name  || '',
+        last_name:   r.last_name   || '',
+        job_title:   r.job_title   || '',
+        department:  r.department  || '',
+      })).filter(r => r.work_email),
+    });
+  } catch (e) {
+    console.error('[OrgImport]', e.message);
+    res.status(500).json({ error: `Org directory query failed: ${e.message}` });
   }
 });
 

@@ -1289,6 +1289,206 @@ function UnassignedAgentsPanel({
   );
 }
 
+// ─── org import ───────────────────────────────────────────────────────────
+function OrgImportButton({
+  userId,
+  existing,
+  getBaseUrl,
+  onImported,
+}: {
+  userId: number;
+  existing: string[];
+  getBaseUrl: () => string;
+  onImported: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [result, setResult] = useState<{ tlFullName: string; employees: any[] } | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [assigning, setAssigning] = useState(false);
+
+  const fetchOrgReports = async () => {
+    setLoading(true);
+    setError('');
+    setResult(null);
+    setSelected(new Set());
+    try {
+      const res = await fetch(`${getBaseUrl()}/api/users/${userId}/org-reports`);
+      const data = await res.json();
+      if (!res.ok) { setError(data.error || `Error ${res.status}`); return; }
+      setResult(data);
+      // Pre-select all that are not already assigned
+      const newOnes = new Set<string>(data.employees.map((e: any) => e.work_email).filter((e: string) => !existing.includes(e)));
+      setSelected(newOnes);
+    } catch {
+      setError('Could not reach the collector.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const open_ = () => { setOpen(true); fetchOrgReports(); };
+  const close = () => { setOpen(false); setResult(null); setError(''); };
+
+  const toggleAll = () => {
+    if (!result) return;
+    const newEmails = result.employees.map((e: any) => e.work_email).filter((e: string) => !existing.includes(e));
+    if (selected.size === newEmails.length) setSelected(new Set());
+    else setSelected(new Set(newEmails));
+  };
+
+  const toggle = (email: string) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      next.has(email) ? next.delete(email) : next.add(email);
+      return next;
+    });
+  };
+
+  const assign = async () => {
+    if (!selected.size) return;
+    setAssigning(true);
+    try {
+      await fetch(`${getBaseUrl()}/api/users/${userId}/agents/bulk`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ emails: [...selected] }),
+      });
+      onImported();
+      close();
+    } finally {
+      setAssigning(false);
+    }
+  };
+
+  return (
+    <>
+      <button
+        onClick={open_}
+        className="cursor-pointer flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-sky-500/30 bg-sky-500/10 text-sky-300 text-xs font-semibold hover:bg-sky-500/20 transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/40"
+        title="Import direct reports from employee directory"
+      >
+        <Users size={12} />
+        Import from Org
+      </button>
+
+      {open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
+          <div className="bg-[var(--bg-card)] border border-[var(--border-ui)] rounded-2xl w-full max-w-2xl shadow-2xl flex flex-col max-h-[80vh]">
+            {/* Header */}
+            <div className="px-6 py-4 border-b border-[var(--border-ui)] flex items-center justify-between shrink-0">
+              <div>
+                <h3 className="text-base font-bold text-[var(--text-main)] tracking-tight">Import from Org Directory</h3>
+                <p className="text-xs text-[var(--text-muted)] mt-0.5">
+                  Full-Time employees reporting to this Team Lead in the employee database
+                </p>
+              </div>
+              <button onClick={close} aria-label="Close" className="cursor-pointer p-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--bg-card-alt)] transition-colors">
+                <X size={15} />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="flex-1 overflow-y-auto custom-scrollbar">
+              {loading && (
+                <div className="flex items-center justify-center py-16 text-[var(--text-muted)] text-sm gap-2">
+                  <RefreshCw size={15} className="animate-spin" /> Querying employee directory…
+                </div>
+              )}
+
+              {error && (
+                <div className="m-5 flex items-start gap-2.5 text-sm text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded-xl px-4 py-3">
+                  <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+                  <span>{error}</span>
+                </div>
+              )}
+
+              {result && (
+                <>
+                  {/* Summary bar */}
+                  <div className="px-6 py-3 bg-[var(--bg-card-alt)]/60 border-b border-[var(--border-ui)] flex items-center justify-between">
+                    <div className="text-xs text-[var(--text-muted)]">
+                      Reporting to <span className="text-[var(--text-main)] font-semibold">{result.tlFullName}</span>
+                      {' · '}
+                      <span className="text-emerald-300 font-semibold">{result.employees.length}</span> Full-Time employee{result.employees.length !== 1 ? 's' : ''} found
+                      {existing.length > 0 && ` · ${result.employees.filter(e => existing.includes(e.work_email)).length} already assigned`}
+                    </div>
+                    {result.employees.some(e => !existing.includes(e.work_email)) && (
+                      <button onClick={toggleAll} className="cursor-pointer text-[11px] font-semibold text-[#c4b5fd] hover:text-white transition-colors">
+                        {selected.size === result.employees.filter(e => !existing.includes(e.work_email)).length ? 'Deselect all' : 'Select all new'}
+                      </button>
+                    )}
+                  </div>
+
+                  {result.employees.length === 0 ? (
+                    <div className="py-12 text-center text-sm text-[var(--text-muted)] italic">
+                      No Full-Time employees found reporting to this Team Lead.
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-[var(--border-ui)]">
+                      {result.employees.map((emp: any) => {
+                        const alreadyAssigned = existing.includes(emp.work_email);
+                        const isSelected = selected.has(emp.work_email);
+                        return (
+                          <label
+                            key={emp.work_email}
+                            className={`flex items-center gap-4 px-6 py-3 transition-colors ${alreadyAssigned ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:bg-[var(--bg-card-alt)]'}`}
+                          >
+                            <input
+                              type="checkbox"
+                              disabled={alreadyAssigned}
+                              checked={isSelected || alreadyAssigned}
+                              onChange={() => !alreadyAssigned && toggle(emp.work_email)}
+                              className="w-4 h-4 rounded accent-[#6a29e1] shrink-0"
+                            />
+                            <div className="flex-1 min-w-0">
+                              <div className="text-sm font-semibold text-[var(--text-main)]">
+                                {emp.first_name} {emp.last_name}
+                                {alreadyAssigned && <span className="ml-2 text-[10px] font-bold text-emerald-400 uppercase tracking-widest">Already assigned</span>}
+                              </div>
+                              <div className="text-xs text-[var(--text-muted)] font-mono mt-0.5">{emp.work_email}</div>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <div className="text-xs text-[var(--text-muted)]">{emp.job_title}</div>
+                              <div className="text-[11px] text-[var(--text-muted)]/70">{emp.department}</div>
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            {/* Footer */}
+            {result && result.employees.length > 0 && (
+              <div className="px-6 py-4 border-t border-[var(--border-ui)] flex items-center justify-between gap-3 shrink-0 bg-[var(--bg-card-alt)]/30">
+                <span className="text-xs text-[var(--text-muted)]">
+                  {selected.size} employee{selected.size !== 1 ? 's' : ''} selected to assign
+                </span>
+                <div className="flex gap-2">
+                  <button onClick={close} className="cursor-pointer px-3 py-1.5 text-sm rounded-lg border border-[var(--border-ui)] bg-[var(--bg-card-alt)] hover:bg-[var(--border-ui)] transition-colors">
+                    Cancel
+                  </button>
+                  <button
+                    onClick={assign}
+                    disabled={assigning || selected.size === 0}
+                    className="cursor-pointer px-4 py-1.5 text-sm rounded-lg bg-[#6a29e1] hover:bg-[#7c3aed] disabled:opacity-40 text-white font-semibold transition-colors shadow-lg shadow-[#6a29e1]/20"
+                  >
+                    {assigning ? 'Assigning…' : `Assign ${selected.size} agent${selected.size !== 1 ? 's' : ''}`}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 // ─── user management tab ──────────────────────────────────────────────────
 function UserManagementTab({ getBaseUrl }: { getBaseUrl: () => string }) {
   const [users, setUsers] = useState<any[]>([]);
@@ -1577,7 +1777,15 @@ function UserManagementTab({ getBaseUrl }: { getBaseUrl: () => string }) {
                     <td colSpan={6} className="bg-[var(--bg-card-alt)] border-b border-[var(--border-ui)] px-6 py-4">
                       {user.role === 'team_lead' ? (
                         <div>
-                          <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-2">Assigned Agents</p>
+                          <div className="flex items-center justify-between mb-2">
+                            <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Assigned Agents</p>
+                            <OrgImportButton
+                              userId={user.id}
+                              existing={userAgents[user.id] || []}
+                              getBaseUrl={getBaseUrl}
+                              onImported={async () => { await refreshAgents(user.id); fetchUsers(); }}
+                            />
+                          </div>
                           {/* assigned email chips */}
                           <div className="flex flex-wrap gap-1.5 mb-3">
                             {(userAgents[user.id] || []).map((email: string) => (
