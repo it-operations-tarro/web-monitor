@@ -1427,12 +1427,12 @@ function OrgImportButton({
                     </div>
                   ) : (
                     <div className="divide-y divide-[var(--border-ui)]">
-                      {result.employees.map((emp: any) => {
+                      {result.employees.map((emp: any, i: number) => {
                         const alreadyAssigned = existing.includes(emp.work_email);
                         const isSelected = selected.has(emp.work_email);
                         return (
                           <label
-                            key={emp.work_email}
+                            key={`${emp.work_email}-${i}`}
                             className={`flex items-center gap-4 px-6 py-3 transition-colors ${alreadyAssigned ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:bg-[var(--bg-card-alt)]'}`}
                           >
                             <input

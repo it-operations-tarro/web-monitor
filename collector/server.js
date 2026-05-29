@@ -761,17 +761,24 @@ app.get('/api/users/:id/org-reports', async (req, res) => {
       [tlFullName]
     );
 
-    res.json({
-      tlEmail,
-      tlFullName,
-      employees: empRows.map(r => ({
+    // Dedupe by work email — directory can hold multiple rows per person
+    // (e.g. rehires). Keep the first occurrence.
+    const seen = new Set();
+    const employees = empRows
+      .map(r => ({
         work_email:  (r.work_email || '').toLowerCase().trim(),
         first_name:  r.first_name  || '',
         last_name:   r.last_name   || '',
         job_title:   r.job_title   || '',
         department:  r.department  || '',
-      })).filter(r => r.work_email),
-    });
+      }))
+      .filter(r => {
+        if (!r.work_email || seen.has(r.work_email)) return false;
+        seen.add(r.work_email);
+        return true;
+      });
+
+    res.json({ tlEmail, tlFullName, employees });
   } catch (e) {
     console.error('[OrgImport]', e.message);
     res.status(500).json({ error: `Org directory query failed: ${e.message}` });
