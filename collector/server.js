@@ -722,12 +722,12 @@ app.get('/api/users/:id/org-reports', async (req, res) => {
     if (!db) return res.status(503).json({ error: 'Cannot connect to employee directory. Check FLOOR_MAP_DB_* settings in .env' });
 
     // 3. Find TL's full display name from the org DB by matching their work email
+    //    Data lives in jira_schema8_objects.attributes (JSON), not employees table
     const [tlRows] = await db.query(
-      `SELECT JSON_UNQUOTE(JSON_EXTRACT(fields, '$."First Name"')) AS first_name,
-              JSON_UNQUOTE(JSON_EXTRACT(fields, '$."Last Name"'))  AS last_name,
-              JSON_UNQUOTE(JSON_EXTRACT(fields, '$."Work Email"')) AS work_email
-       FROM employees
-       WHERE LOWER(JSON_UNQUOTE(JSON_EXTRACT(fields, '$."Work Email"'))) = ?
+      `SELECT JSON_UNQUOTE(JSON_EXTRACT(attributes, '$."First Name"')) AS first_name,
+              JSON_UNQUOTE(JSON_EXTRACT(attributes, '$."Last Name"'))  AS last_name
+       FROM jira_schema8_objects
+       WHERE LOWER(JSON_UNQUOTE(JSON_EXTRACT(attributes, '$."Work Email"'))) = ?
        LIMIT 1`,
       [tlEmail]
     );
@@ -746,17 +746,17 @@ app.get('/api/users/:id/org-reports', async (req, res) => {
 
     // 4. Find all Full-Time employees reporting to this Team Lead
     const [empRows] = await db.query(
-      `SELECT JSON_UNQUOTE(JSON_EXTRACT(fields, '$."Work Email"'))  AS work_email,
-              JSON_UNQUOTE(JSON_EXTRACT(fields, '$."First Name"'))  AS first_name,
-              JSON_UNQUOTE(JSON_EXTRACT(fields, '$."Last Name"'))   AS last_name,
-              JSON_UNQUOTE(JSON_EXTRACT(fields, '$."Job Title"'))   AS job_title,
-              JSON_UNQUOTE(JSON_EXTRACT(fields, '$."Department"'))  AS department
-       FROM employees
-       WHERE JSON_UNQUOTE(JSON_EXTRACT(fields, '$."Reporting to"'))  = ?
-         AND JSON_UNQUOTE(JSON_EXTRACT(fields, '$."Employment Status"')) = 'Full-Time'
-         AND JSON_UNQUOTE(JSON_EXTRACT(fields, '$."Work Email"')) IS NOT NULL
-         AND JSON_UNQUOTE(JSON_EXTRACT(fields, '$."Work Email"')) != 'null'
-         AND JSON_UNQUOTE(JSON_EXTRACT(fields, '$."Work Email"')) != ''
+      `SELECT JSON_UNQUOTE(JSON_EXTRACT(attributes, '$."Work Email"'))  AS work_email,
+              JSON_UNQUOTE(JSON_EXTRACT(attributes, '$."First Name"'))  AS first_name,
+              JSON_UNQUOTE(JSON_EXTRACT(attributes, '$."Last Name"'))   AS last_name,
+              JSON_UNQUOTE(JSON_EXTRACT(attributes, '$."Job Title"'))   AS job_title,
+              JSON_UNQUOTE(JSON_EXTRACT(attributes, '$."Department"'))  AS department
+       FROM jira_schema8_objects
+       WHERE JSON_UNQUOTE(JSON_EXTRACT(attributes, '$."Reporting to"'))     = ?
+         AND JSON_UNQUOTE(JSON_EXTRACT(attributes, '$."Employment Status"')) = 'Full-Time'
+         AND JSON_UNQUOTE(JSON_EXTRACT(attributes, '$."Work Email"')) IS NOT NULL
+         AND JSON_UNQUOTE(JSON_EXTRACT(attributes, '$."Work Email"')) != 'null'
+         AND JSON_UNQUOTE(JSON_EXTRACT(attributes, '$."Work Email"')) != ''
        ORDER BY last_name, first_name`,
       [tlFullName]
     );
