@@ -371,7 +371,7 @@ export default function Dashboard() {
           />
         )}
         {activeTab === 'machines' && <MachineStatusView machines={machines} onDelete={setMachineToDelete} />}
-        {activeTab === 'enforcement' && <EnforcementView data={enforcement} />}
+        {activeTab === 'enforcement' && <EnforcementView data={enforcement} getBaseUrl={getBaseUrl} onRefresh={fetchData} />}
         {activeTab === 'users' && <UserManagementTab getBaseUrl={getBaseUrl} />}
 
         {/* delete modal */}
@@ -739,7 +739,19 @@ function MachineStatusView({ machines, onDelete }: { machines: any[]; onDelete: 
 }
 
 // ─── enforcement tab ──────────────────────────────────────────────────────
-function EnforcementView({ data }: { data: any }) {
+const BUILTIN_CATEGORIES = ['social', 'gambling', 'streaming', 'ph_shopping', 'manual'];
+
+function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUrl: () => string; onRefresh: () => void }) {
+  const [domainRaw, setDomainRaw] = useState('');
+  const [domainCategory, setDomainCategory] = useState('manual');
+  const [domainSaving, setDomainSaving] = useState(false);
+  const [domainError, setDomainError] = useState('');
+  const [newCatName, setNewCatName] = useState('');
+  const [catSaving, setCatSaving] = useState(false);
+  const [catError, setCatError] = useState('');
+  const [toggling, setToggling] = useState<string | null>(null);
+  const [removing, setRemoving] = useState<string | null>(null);
+
   if (!data) {
     return (
       <Panel>
@@ -767,7 +779,71 @@ function EnforcementView({ data }: { data: any }) {
     topOffendingUsers = [],
   } = data;
 
-  const allCategories = ['social', 'gambling', 'streaming', 'ph_shopping', 'manual'];
+  // All categories: builtins + any custom ones in enabledCategories not already in builtins
+  const customCategories = enabledCategories.filter((c: string) => !BUILTIN_CATEGORIES.includes(c));
+  const allCategories = [...BUILTIN_CATEGORIES, ...customCategories];
+  const allCategoryOptions = allCategories.filter(c => c !== 'manual');
+
+  const parsedDomains = domainRaw
+    .split(/[\n,;]+/)
+    .map(d => d.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, ''))
+    .filter(Boolean);
+
+  const addDomains = async () => {
+    setDomainError('');
+    if (!parsedDomains.length) { setDomainError('Enter at least one domain.'); return; }
+    setDomainSaving(true);
+    try {
+      const res = await fetch(`${getBaseUrl()}/api/enforcement/domains`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ domains: parsedDomains, category: domainCategory }),
+      });
+      if (res.ok) { setDomainRaw(''); onRefresh(); }
+      else { const d = await res.json().catch(() => ({})); setDomainError(d.error || `Error ${res.status}`); }
+    } catch { setDomainError('Could not reach collector.'); }
+    finally { setDomainSaving(false); }
+  };
+
+  const removeDomain = async (domain: string) => {
+    setRemoving(domain);
+    try {
+      await fetch(`${getBaseUrl()}/api/enforcement/domains/${encodeURIComponent(domain)}`, { method: 'DELETE' });
+      onRefresh();
+    } finally { setRemoving(null); }
+  };
+
+  const toggleCategory = async (name: string) => {
+    setToggling(name);
+    try {
+      await fetch(`${getBaseUrl()}/api/enforcement/categories/${encodeURIComponent(name)}/toggle`, { method: 'PATCH' });
+      onRefresh();
+    } finally { setToggling(null); }
+  };
+
+  const addCategory = async () => {
+    setCatError('');
+    if (!newCatName.trim()) { setCatError('Enter a category name.'); return; }
+    setCatSaving(true);
+    try {
+      const res = await fetch(`${getBaseUrl()}/api/enforcement/categories`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newCatName.trim() }),
+      });
+      if (res.ok) { setNewCatName(''); onRefresh(); }
+      else { const d = await res.json().catch(() => ({})); setCatError(d.error || `Error ${res.status}`); }
+    } catch { setCatError('Could not reach collector.'); }
+    finally { setCatSaving(false); }
+  };
+
+  const deleteCategory = async (name: string) => {
+    setToggling(name);
+    try {
+      await fetch(`${getBaseUrl()}/api/enforcement/categories/${encodeURIComponent(name)}`, { method: 'DELETE' });
+      onRefresh();
+    } finally { setToggling(null); }
+  };
 
   return (
     <div className="space-y-3">
@@ -777,10 +853,57 @@ function EnforcementView({ data }: { data: any }) {
         <Tile title="Manual Entries" value={manualBlacklist.length} tone="danger" icon={<AlertTriangle size={14} />} />
       </div>
 
+      {/* ── Add domains ─────────────────────────────────────────────────── */}
+      <Panel>
+        <PanelHeader accent="danger" title="Add Domains to Blocklist" subtitle="Paste one per line, or comma/semicolon separated — stripped to hostname automatically" />
+        <div className="p-5 space-y-3">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+            <div className="md:col-span-3">
+              <textarea
+                rows={3}
+                className="w-full bg-[var(--bg-card-alt)] border border-[var(--border-ui)] rounded-md px-3 py-2 text-sm text-[var(--text-main)] placeholder-[var(--text-muted)] font-mono focus:outline-none focus:border-[#6a29e1]/60 resize-none"
+                placeholder={"tiktok.com\nfacebook.com\nhttps://instagram.com/"}
+                value={domainRaw}
+                onChange={e => setDomainRaw(e.target.value)}
+              />
+            </div>
+            <div className="flex flex-col gap-2">
+              <label className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Category</label>
+              <select
+                className="bg-[var(--bg-card-alt)] border border-[var(--border-ui)] rounded-md px-3 py-2 text-sm text-[var(--text-main)] focus:outline-none focus:border-[#6a29e1]/60 flex-1"
+                value={domainCategory}
+                onChange={e => setDomainCategory(e.target.value)}
+              >
+                {allCategoryOptions.map(c => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+                <option value="manual">manual (policy)</option>
+              </select>
+              <button
+                onClick={addDomains}
+                disabled={domainSaving || parsedDomains.length === 0}
+                className="px-3 py-2 bg-[#6a29e1] hover:bg-[#7c3aed] disabled:opacity-40 text-white text-xs font-medium rounded-md transition-colors"
+              >
+                {domainSaving ? 'Adding…' : `Add ${parsedDomains.length || ''} domain${parsedDomains.length !== 1 ? 's' : ''}`}
+              </button>
+            </div>
+          </div>
+          {domainError && <p className="text-xs text-rose-300">{domainError}</p>}
+          {parsedDomains.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {parsedDomains.map(d => (
+                <span key={d} className="px-2 py-0.5 bg-[var(--bg-card-alt)] border border-[var(--border-ui)] rounded text-[11px] font-mono text-[var(--text-main)]">{d}</span>
+              ))}
+            </div>
+          )}
+        </div>
+      </Panel>
+
+      {/* ── Category policy ─────────────────────────────────────────────── */}
       <Panel>
         <PanelHeader
           title="Category Policy"
-          subtitle="Per-category enforcement state and dictionary size"
+          subtitle="Toggle enforcement per category — changes apply immediately to config"
           right={
             lastSyncedAt && (
               <span className="text-[10px] text-[var(--text-muted)] flex items-center gap-1.5 font-mono">
@@ -795,28 +918,75 @@ function EnforcementView({ data }: { data: any }) {
               <th className={TH}>Category</th>
               <th className={TH}>Status</th>
               <th className={`${TH} text-right`}>Domains</th>
+              <th className={`${TH} text-right`}>Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-[var(--border-ui)]">
             {allCategories.map((cat) => {
+              const isBuiltin = BUILTIN_CATEGORIES.includes(cat);
               const isOn = cat === 'manual' ? manualBlacklist.length > 0 : enabledCategories.includes(cat);
               const count = categoryCounts[cat] || 0;
+              const busy = toggling === cat;
               return (
-                <tr key={cat} className="hover:bg-[var(--bg-card-alt)] transition-colors">
-                  <td className={TD}>
-                    <CategoryTag category={cat} />
-                  </td>
+                <tr key={cat} className="hover:bg-[var(--bg-card-alt)] transition-colors group">
+                  <td className={TD}><CategoryTag category={cat} /></td>
                   <td className={TD}>
                     <StatusPill tone={isOn ? 'success' : 'neutral'} label={isOn ? 'Enforced' : 'Inactive'} pulse={isOn} />
                   </td>
                   <td className={`${TD} text-right`}>
                     <span className="font-semibold tabular-nums text-[var(--text-main)]">{count.toLocaleString()}</span>
                   </td>
+                  <td className={`${TD} text-right`}>
+                    <div className="flex items-center justify-end gap-1">
+                      {cat !== 'manual' && (
+                        <button
+                          onClick={() => toggleCategory(cat)}
+                          disabled={busy}
+                          className={`px-2.5 py-1 text-[11px] font-medium rounded-md border transition-colors disabled:opacity-40 ${
+                            isOn
+                              ? 'border-rose-500/30 text-rose-300 hover:bg-rose-500/10'
+                              : 'border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/10'
+                          }`}
+                        >
+                          {busy ? '…' : isOn ? 'Disable' : 'Enable'}
+                        </button>
+                      )}
+                      {!isBuiltin && (
+                        <button
+                          onClick={() => deleteCategory(cat)}
+                          disabled={busy}
+                          className="p-1.5 text-[var(--text-muted)] hover:text-rose-300 hover:bg-rose-500/10 rounded-md transition-colors opacity-0 group-hover:opacity-100 disabled:opacity-40"
+                          title="Delete category and all its domains"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      )}
+                    </div>
+                  </td>
                 </tr>
               );
             })}
           </tbody>
         </table>
+
+        {/* Add new category */}
+        <div className="px-5 py-3 border-t border-[var(--border-ui)] bg-[var(--bg-card-alt)] flex items-center gap-2">
+          <input
+            className="bg-[var(--bg-card)] border border-[var(--border-ui)] rounded-md px-3 py-1.5 text-sm text-[var(--text-main)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[#6a29e1]/60 flex-1 max-w-xs"
+            placeholder="New category name…"
+            value={newCatName}
+            onChange={e => setNewCatName(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && addCategory()}
+          />
+          <button
+            onClick={addCategory}
+            disabled={catSaving || !newCatName.trim()}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-[#6a29e1] hover:bg-[#7c3aed] disabled:opacity-40 text-white text-xs font-medium rounded-md transition-colors"
+          >
+            <Plus size={12} /> Add category
+          </button>
+          {catError && <span className="text-xs text-rose-300">{catError}</span>}
+        </div>
       </Panel>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
@@ -833,23 +1003,13 @@ function EnforcementView({ data }: { data: any }) {
             <tbody className="divide-y divide-[var(--border-ui)]">
               {topOffendingDomains.map((d: any) => (
                 <tr key={d.domain} className="hover:bg-rose-500/5 transition-colors">
-                  <td className={TD}>
-                    <span className="font-mono text-xs text-[var(--text-main)] truncate">{d.domain}</span>
-                  </td>
-                  <td className={TD}>
-                    <CategoryTag category={d.category} />
-                  </td>
-                  <td className={`${TD} text-right`}>
-                    <span className="text-rose-300 font-semibold tabular-nums">{d.count}</span>
-                  </td>
+                  <td className={TD}><span className="font-mono text-xs text-[var(--text-main)] truncate">{d.domain}</span></td>
+                  <td className={TD}><CategoryTag category={d.category} /></td>
+                  <td className={`${TD} text-right`}><span className="text-rose-300 font-semibold tabular-nums">{d.count}</span></td>
                 </tr>
               ))}
               {topOffendingDomains.length === 0 && (
-                <tr>
-                  <td colSpan={3} className="px-4 py-8 text-center text-xs text-[var(--text-muted)] italic">
-                    No policy violations recorded.
-                  </td>
-                </tr>
+                <tr><td colSpan={3} className="px-4 py-8 text-center text-xs text-[var(--text-muted)] italic">No policy violations recorded.</td></tr>
               )}
             </tbody>
           </table>
@@ -868,46 +1028,37 @@ function EnforcementView({ data }: { data: any }) {
             <tbody className="divide-y divide-[var(--border-ui)]">
               {topOffendingUsers.map((u: any) => (
                 <tr key={u.username} className="hover:bg-[var(--bg-card-alt)] transition-colors">
-                  <td className={TD}>
-                    <span className="text-[#c4b5fd] font-mono text-xs">{u.username}</span>
-                  </td>
-                  <td className={TD}>
-                    <span className="font-mono text-xs text-[var(--text-muted)]">{u.machine_id}</span>
-                  </td>
-                  <td className={`${TD} text-right`}>
-                    <span className="text-rose-300 font-semibold tabular-nums">{u.count}</span>
-                  </td>
+                  <td className={TD}><span className="text-[#c4b5fd] font-mono text-xs">{u.username}</span></td>
+                  <td className={TD}><span className="font-mono text-xs text-[var(--text-muted)]">{u.machine_id}</span></td>
+                  <td className={`${TD} text-right`}><span className="text-rose-300 font-semibold tabular-nums">{u.count}</span></td>
                 </tr>
               ))}
               {topOffendingUsers.length === 0 && (
-                <tr>
-                  <td colSpan={3} className="px-4 py-8 text-center text-xs text-[var(--text-muted)] italic">
-                    No agent violations recorded.
-                  </td>
-                </tr>
+                <tr><td colSpan={3} className="px-4 py-8 text-center text-xs text-[var(--text-muted)] italic">No agent violations recorded.</td></tr>
               )}
             </tbody>
           </table>
         </Panel>
       </div>
 
+      {/* ── Manual blacklist with remove ────────────────────────────────── */}
       <Panel>
-        <PanelHeader accent="neutral" title="Manual Blacklist" subtitle="Domains pinned via config.manual_blacklist" />
+        <PanelHeader accent="neutral" title="Manual Blacklist" subtitle="Domains pinned as policy — click × to remove" />
         <div className="p-5">
           {manualBlacklist.length === 0 ? (
-            <p className="text-xs text-[var(--text-muted)] italic">
-              No manual entries. Add domains to{' '}
-              <code className="font-mono text-[#c4b5fd] bg-[var(--bg-card-alt)] px-1 py-0.5 rounded">config.manual_blacklist</code>{' '}
-              on the collector to enforce them across all agents.
-            </p>
+            <p className="text-xs text-[var(--text-muted)] italic">No manual entries. Add domains above and select the <span className="font-mono text-[#c4b5fd]">manual</span> category.</p>
           ) : (
             <div className="flex flex-wrap gap-1.5">
               {manualBlacklist.map((domain: string) => (
-                <span
-                  key={domain}
-                  className="px-2 py-0.5 bg-[var(--bg-card-alt)] border border-[var(--border-ui)] rounded text-[11px] font-mono text-[var(--text-main)]"
-                >
+                <span key={domain} className="flex items-center gap-1 px-2 py-0.5 bg-[var(--bg-card-alt)] border border-[var(--border-ui)] rounded text-[11px] font-mono text-[var(--text-main)]">
                   {domain}
+                  <button
+                    onClick={() => removeDomain(domain)}
+                    disabled={removing === domain}
+                    className="ml-0.5 text-[var(--text-muted)] hover:text-rose-300 disabled:opacity-40 transition-colors"
+                  >
+                    <X size={11} />
+                  </button>
                 </span>
               ))}
             </div>

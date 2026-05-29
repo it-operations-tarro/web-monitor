@@ -303,6 +303,109 @@ app.get('/api/enforcement', (req, res) => {
   });
 });
 
+// ─── Enforcement config mutation helpers ───────────────────────────────────
+function readConfig() {
+  const configPath = path.join(__dirname, 'config.json');
+  return JSON.parse(fs.readFileSync(configPath, 'utf8'));
+}
+function writeConfig(config) {
+  const configPath = path.join(__dirname, 'config.json');
+  fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+}
+
+// Add one or more domains to a category
+app.post('/api/enforcement/domains', (req, res) => {
+  const { domains, category } = req.body;
+  if (!domains || !category) return res.status(400).json({ error: 'Missing domains or category' });
+  const list = (Array.isArray(domains) ? domains : [domains])
+    .map(d => d.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, ''))
+    .filter(Boolean);
+  try {
+    const config = readConfig();
+    config.category_map = config.category_map || {};
+    config.blacklist = config.blacklist || [];
+    config.manual_blacklist = config.manual_blacklist || [];
+    for (const domain of list) {
+      config.category_map[domain] = category;
+      if (!config.blacklist.includes(domain)) config.blacklist.push(domain);
+      if (category === 'manual' && !config.manual_blacklist.includes(domain)) {
+        config.manual_blacklist.push(domain);
+      }
+    }
+    writeConfig(config);
+    res.json({ status: 'added', count: list.length });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to update config' });
+  }
+});
+
+// Remove a domain from the blacklist entirely
+app.delete('/api/enforcement/domains/:domain', (req, res) => {
+  const domain = decodeURIComponent(req.params.domain);
+  try {
+    const config = readConfig();
+    config.blacklist = (config.blacklist || []).filter(d => d !== domain);
+    config.manual_blacklist = (config.manual_blacklist || []).filter(d => d !== domain);
+    delete (config.category_map || {})[domain];
+    writeConfig(config);
+    res.json({ status: 'removed' });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to update config' });
+  }
+});
+
+// Add a new custom category (enables it immediately)
+app.post('/api/enforcement/categories', (req, res) => {
+  const { name } = req.body;
+  if (!name) return res.status(400).json({ error: 'Missing name' });
+  const slug = name.trim().toLowerCase().replace(/\s+/g, '_');
+  try {
+    const config = readConfig();
+    config.categories = config.categories || [];
+    if (!config.categories.includes(slug)) config.categories.push(slug);
+    writeConfig(config);
+    res.json({ status: 'added', slug });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to update config' });
+  }
+});
+
+// Toggle a category on or off
+app.patch('/api/enforcement/categories/:name/toggle', (req, res) => {
+  const name = decodeURIComponent(req.params.name);
+  try {
+    const config = readConfig();
+    config.categories = config.categories || [];
+    const idx = config.categories.indexOf(name);
+    if (idx === -1) config.categories.push(name);
+    else config.categories.splice(idx, 1);
+    writeConfig(config);
+    res.json({ status: 'ok', enabled: config.categories.includes(name) });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to toggle category' });
+  }
+});
+
+// Delete a custom category and all its domain mappings
+app.delete('/api/enforcement/categories/:name', (req, res) => {
+  const name = decodeURIComponent(req.params.name);
+  try {
+    const config = readConfig();
+    config.categories = (config.categories || []).filter(c => c !== name);
+    const map = config.category_map || {};
+    const toRemove = Object.keys(map).filter(d => map[d] === name);
+    toRemove.forEach(d => {
+      delete map[d];
+      config.blacklist = (config.blacklist || []).filter(b => b !== d);
+    });
+    config.category_map = map;
+    writeConfig(config);
+    res.json({ status: 'deleted', domainsRemoved: toRemove.length });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to delete category' });
+  }
+});
+
 /**
  * Endpoint to serve global extension config
  */
