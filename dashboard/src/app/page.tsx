@@ -372,7 +372,7 @@ export default function Dashboard() {
         )}
         {activeTab === 'machines' && <MachineStatusView machines={machines} onDelete={setMachineToDelete} />}
         {activeTab === 'enforcement' && <EnforcementView data={enforcement} />}
-        {activeTab === 'users' && <UserManagementTab getBaseUrl={getBaseUrl} machines={machines} />}
+        {activeTab === 'users' && <UserManagementTab getBaseUrl={getBaseUrl} />}
 
         {/* delete modal */}
         {machineToDelete && (
@@ -930,8 +930,227 @@ function RoleBadge({ role }: { role: string }) {
   return <StatusPill tone={meta.tone} label={meta.label} />;
 }
 
+// ─── bulk email input ─────────────────────────────────────────────────────
+function BulkEmailInput({ existing, onAssign }: { existing: string[]; onAssign: (emails: string[]) => Promise<void> }) {
+  const [raw, setRaw] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const parsed = raw
+    .split(/[\n,;]+/)
+    .map(e => e.trim().toLowerCase())
+    .filter(e => e.includes('@') && !existing.includes(e));
+
+  const dupes = raw
+    .split(/[\n,;]+/)
+    .map(e => e.trim().toLowerCase())
+    .filter(e => e.includes('@') && existing.includes(e));
+
+  const handleAssign = async () => {
+    if (!parsed.length) return;
+    setSaving(true);
+    try {
+      await onAssign(parsed);
+      setRaw('');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      <label className="block text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+        Add agents by email — paste one per line, or comma/semicolon separated
+      </label>
+      <textarea
+        rows={3}
+        className="w-full bg-[var(--bg-card)] border border-[var(--border-ui)] rounded-md px-3 py-2 text-sm text-[var(--text-main)] placeholder-[var(--text-muted)] font-mono focus:outline-none focus:border-[#6a29e1]/60 resize-none"
+        placeholder={"juan@company.com\nmaria@company.com\npedro@company.com"}
+        value={raw}
+        onChange={e => setRaw(e.target.value)}
+      />
+      {raw.trim() && (
+        <div className="flex items-center gap-3 flex-wrap">
+          {parsed.length > 0 && (
+            <span className="text-[11px] text-emerald-300">
+              {parsed.length} new email{parsed.length !== 1 ? 's' : ''} to add
+            </span>
+          )}
+          {dupes.length > 0 && (
+            <span className="text-[11px] text-[var(--text-muted)]">
+              {dupes.length} already assigned (skipped)
+            </span>
+          )}
+          {parsed.length === 0 && dupes.length === 0 && (
+            <span className="text-[11px] text-amber-300">No valid email addresses detected.</span>
+          )}
+        </div>
+      )}
+      <button
+        onClick={handleAssign}
+        disabled={saving || parsed.length === 0}
+        className="px-3 py-1.5 bg-[#6a29e1] hover:bg-[#7c3aed] disabled:opacity-40 text-white text-xs font-medium rounded-md transition-colors"
+      >
+        {saving ? 'Assigning…' : `Assign ${parsed.length > 0 ? parsed.length : ''} agent${parsed.length !== 1 ? 's' : ''}`}
+      </button>
+    </div>
+  );
+}
+
+// ─── unassigned agents panel ──────────────────────────────────────────────
+function UnassignedAgentsPanel({
+  getBaseUrl,
+  teamLeads,
+  onAssigned,
+}: {
+  getBaseUrl: () => string;
+  teamLeads: any[];
+  onAssigned: () => void;
+}) {
+  const [agents, setAgents] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selections, setSelections] = useState<Record<string, string>>({}); // email → tlId
+  const [assigning, setAssigning] = useState<Record<string, boolean>>({});
+
+  const fetchUnassigned = useCallback(async () => {
+    try {
+      const res = await fetch(`${getBaseUrl()}/api/users/unassigned-agents`, { cache: 'no-store' });
+      if (res.ok) setAgents(await res.json());
+    } finally {
+      setLoading(false);
+    }
+  }, [getBaseUrl]);
+
+  useEffect(() => { fetchUnassigned(); }, [fetchUnassigned]);
+
+  const isOnline = (lastSeen: string) => new Date().getTime() - new Date(lastSeen).getTime() < 120000;
+
+  const assign = async (agent: any) => {
+    const tlId = selections[agent.username];
+    if (!tlId) return;
+    setAssigning(prev => ({ ...prev, [agent.username]: true }));
+    try {
+      await fetch(`${getBaseUrl()}/api/users/${tlId}/agents/bulk`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ emails: [agent.username] }),
+      });
+      await fetchUnassigned();
+      onAssigned();
+    } finally {
+      setAssigning(prev => ({ ...prev, [agent.username]: false }));
+    }
+  };
+
+  const assignAll = async () => {
+    const toAssign = agents.filter(a => selections[a.username]);
+    for (const agent of toAssign) await assign(agent);
+  };
+
+  if (!loading && agents.length === 0) {
+    return (
+      <Panel>
+        <PanelHeader accent="success" title="Unassigned Agents" subtitle="All agents have a Team Lead assigned" />
+        <div className="px-5 py-6 flex items-center gap-3 text-sm text-emerald-300">
+          <span className="w-2 h-2 rounded-full bg-emerald-400" />
+          Every active agent is covered. Nothing to action.
+        </div>
+      </Panel>
+    );
+  }
+
+  const allSelected = agents.length > 0 && agents.every(a => selections[a.username]);
+  const someSelected = agents.some(a => selections[a.username]);
+
+  return (
+    <Panel className="border-amber-500/30">
+      <PanelHeader
+        accent="warn"
+        title="Unassigned Agents"
+        subtitle={loading ? 'Checking…' : `${agents.length} agent${agents.length !== 1 ? 's' : ''} not assigned to any Team Lead`}
+        right={
+          someSelected && teamLeads.length > 0 ? (
+            <button
+              onClick={assignAll}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-[#6a29e1] hover:bg-[#7c3aed] text-white transition-colors"
+            >
+              <Plus size={12} /> Assign selected
+            </button>
+          ) : undefined
+        }
+      />
+
+      {teamLeads.length === 0 && (
+        <div className="px-5 py-4 text-xs text-amber-300 bg-amber-500/5 border-b border-amber-500/20">
+          No Team Lead accounts exist yet. Create one above before assigning agents.
+        </div>
+      )}
+
+      <table className="w-full text-left border-collapse">
+        <thead>
+          <tr className="bg-[var(--bg-card-alt)] border-b border-[var(--border-ui)]">
+            <th className={TH}>Status</th>
+            <th className={TH}>Agent Email</th>
+            <th className={TH}>Machine ID</th>
+            <th className={TH}>Last Seen</th>
+            <th className={TH}>Assign to Team Lead</th>
+            <th className={`${TH} text-right`}>Action</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-[var(--border-ui)]">
+          {loading && (
+            <tr><td colSpan={6} className="px-4 py-6 text-center text-xs text-[var(--text-muted)] italic">Loading…</td></tr>
+          )}
+          {agents.map(agent => {
+            const online = isOnline(agent.last_seen);
+            const selectedTl = selections[agent.username] || '';
+            const busy = assigning[agent.username];
+            return (
+              <tr key={agent.machine_id} className="hover:bg-amber-500/5 transition-colors">
+                <td className={TD}>
+                  <StatusPill tone={online ? 'success' : 'neutral'} label={online ? 'Online' : 'Offline'} pulse={online} />
+                </td>
+                <td className={TD}>
+                  <span className="font-mono text-sm text-[#c4b5fd]">{agent.username}</span>
+                </td>
+                <td className={TD}>
+                  <span className="font-mono text-xs text-[var(--text-muted)]">{agent.machine_id}</span>
+                </td>
+                <td className={`${TD} text-[var(--text-muted)] font-mono text-xs`}>
+                  {format(new Date(agent.last_seen), 'MMM dd, HH:mm')}
+                </td>
+                <td className={TD}>
+                  <select
+                    className="bg-[var(--bg-card)] border border-[var(--border-ui)] rounded-md px-2 py-1.5 text-xs text-[var(--text-main)] focus:outline-none focus:border-[#6a29e1]/60 w-full max-w-[200px]"
+                    value={selectedTl}
+                    onChange={e => setSelections(prev => ({ ...prev, [agent.username]: e.target.value }))}
+                    disabled={teamLeads.length === 0}
+                  >
+                    <option value="">Select Team Lead…</option>
+                    {teamLeads.map(tl => (
+                      <option key={tl.id} value={tl.id}>{tl.name} ({tl.username})</option>
+                    ))}
+                  </select>
+                </td>
+                <td className={`${TD} text-right`}>
+                  <button
+                    onClick={() => assign(agent)}
+                    disabled={!selectedTl || busy}
+                    className="px-3 py-1.5 text-xs font-medium rounded-md bg-[#6a29e1] hover:bg-[#7c3aed] disabled:opacity-30 text-white transition-colors"
+                  >
+                    {busy ? 'Assigning…' : 'Assign'}
+                  </button>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </Panel>
+  );
+}
+
 // ─── user management tab ──────────────────────────────────────────────────
-function UserManagementTab({ getBaseUrl, machines }: { getBaseUrl: () => string; machines: any[] }) {
+function UserManagementTab({ getBaseUrl }: { getBaseUrl: () => string }) {
   const [users, setUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -942,7 +1161,6 @@ function UserManagementTab({ getBaseUrl, machines }: { getBaseUrl: () => string;
   const [expandedUser, setExpandedUser] = useState<number | null>(null);
   const [userAgents, setUserAgents] = useState<Record<number, string[]>>({});
   const [userReports, setUserReports] = useState<Record<number, any[]>>({});
-  const [agentInput, setAgentInput] = useState('');
   const [reportInput, setReportInput] = useState('');
   const [resetTarget, setResetTarget] = useState<any>(null);
   const [resetPassword, setResetPassword] = useState('');
@@ -1012,19 +1230,8 @@ function UserManagementTab({ getBaseUrl, machines }: { getBaseUrl: () => string;
     }
   };
 
-  const assignAgent = async (userId: number) => {
-    const mid = agentInput.trim();
-    if (!mid) return;
-    await fetch(`${getBaseUrl()}/api/users/${userId}/agents`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ machine_id: mid }),
-    });
-    setAgentInput('');
-    await refreshAgents(userId);
-    fetchUsers();
-  };
-
-  const unassignAgent = async (userId: number, machineId: string) => {
-    await fetch(`${getBaseUrl()}/api/users/${userId}/agents/${encodeURIComponent(machineId)}`, { method: 'DELETE' });
+  const unassignAgent = async (userId: number, email: string) => {
+    await fetch(`${getBaseUrl()}/api/users/${userId}/agents/${encodeURIComponent(email)}`, { method: 'DELETE' });
     await refreshAgents(userId);
     fetchUsers();
   };
@@ -1230,33 +1437,32 @@ function UserManagementTab({ getBaseUrl, machines }: { getBaseUrl: () => string;
                     <td colSpan={6} className="bg-[var(--bg-card-alt)] border-b border-[var(--border-ui)] px-6 py-4">
                       {user.role === 'team_lead' ? (
                         <div>
-                          <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-2">Assigned Agents (Machines)</p>
+                          <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-2">Assigned Agents</p>
+                          {/* assigned email chips */}
                           <div className="flex flex-wrap gap-1.5 mb-3">
-                            {(userAgents[user.id] || []).map(mid => (
-                              <span key={mid} className="flex items-center gap-1 px-2 py-0.5 bg-[var(--bg-card)] border border-[var(--border-ui)] rounded text-[11px] font-mono text-[var(--text-main)]">
-                                {mid}
-                                <button onClick={() => unassignAgent(user.id, mid)} className="ml-1 text-[var(--text-muted)] hover:text-rose-300">
+                            {(userAgents[user.id] || []).map((email: string) => (
+                              <span key={email} className="flex items-center gap-1 px-2 py-0.5 bg-[var(--bg-card)] border border-[var(--border-ui)] rounded text-[11px] font-mono text-[var(--text-main)]">
+                                {email}
+                                <button onClick={() => unassignAgent(user.id, email)} className="ml-1 text-[var(--text-muted)] hover:text-rose-300">
                                   <X size={11} />
                                 </button>
                               </span>
                             ))}
                             {!(userAgents[user.id]?.length) && <span className="text-xs text-[var(--text-muted)] italic">No agents assigned.</span>}
                           </div>
-                          <div className="flex gap-2">
-                            <select
-                              className="bg-[var(--bg-card)] border border-[var(--border-ui)] rounded-md px-3 py-1.5 text-sm text-[var(--text-main)] focus:outline-none focus:border-[#6a29e1]/60 flex-1 max-w-xs"
-                              value={agentInput}
-                              onChange={e => setAgentInput(e.target.value)}
-                            >
-                              <option value="">Select machine…</option>
-                              {machines.filter(m => !(userAgents[user.id] || []).includes(m.machine_id)).map(m => (
-                                <option key={m.machine_id} value={m.machine_id}>{m.machine_id} ({m.username || 'unknown'})</option>
-                              ))}
-                            </select>
-                            <button onClick={() => assignAgent(user.id)} className="px-3 py-1.5 bg-[#6a29e1] hover:bg-[#7c3aed] text-white text-xs font-medium rounded-md transition-colors">
-                              Assign
-                            </button>
-                          </div>
+                          {/* bulk paste input */}
+                          <BulkEmailInput
+                            existing={userAgents[user.id] || []}
+                            onAssign={async (emails) => {
+                              await fetch(`${getBaseUrl()}/api/users/${user.id}/agents/bulk`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ emails }),
+                              });
+                              await refreshAgents(user.id);
+                              fetchUsers();
+                            }}
+                          />
                         </div>
                       ) : (
                         <div>
@@ -1303,6 +1509,8 @@ function UserManagementTab({ getBaseUrl, machines }: { getBaseUrl: () => string;
           </tbody>
         </table>
       </Panel>
+
+      <UnassignedAgentsPanel getBaseUrl={getBaseUrl} teamLeads={teamLeads} onAssigned={fetchUsers} />
 
       {/* Portal access info */}
       <Panel>

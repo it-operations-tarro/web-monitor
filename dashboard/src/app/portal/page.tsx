@@ -282,6 +282,11 @@ function PortalDashboard({ token, user, onLogout }: { token: string; user: any; 
   const bwViolations = data?.bwViolations || [];
   const teamMembers = data?.teamMembers || [];
   const machineIds: string[] = data?.machineIds || [];
+  const assignedAgents: any[] = data?.assignedAgents || [];
+
+  const onlineCount = assignedAgents.filter(
+    a => new Date().getTime() - new Date(a.last_seen).getTime() < 120000
+  ).length;
 
   return (
     <div className="min-h-screen bg-[var(--bg-page)] text-[var(--text-main)] transition-colors duration-300">
@@ -337,7 +342,13 @@ function PortalDashboard({ token, user, onLogout }: { token: string; user: any; 
 
         {/* KPI tiles */}
         <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
-          <Tile title="Monitored Agents" value={machineIds.length} tone="brand" icon={<Monitor size={14} />} />
+          <Tile
+            title="Monitored Agents"
+            value={`${onlineCount} / ${machineIds.length}`}
+            sub={`${onlineCount} online · ${machineIds.length - onlineCount} offline`}
+            tone="brand"
+            icon={<Monitor size={14} />}
+          />
           <Tile title="Active Violations" value={violations.length} tone="danger" sub="In live feed" icon={<AlertTriangle size={14} />} />
           <Tile title="Live Events" value={recentLogs.length} tone="success" icon={<Activity size={14} />} />
           {(user.role === 'manager' || user.role === 'director') && (
@@ -370,6 +381,67 @@ function PortalDashboard({ token, user, onLogout }: { token: string; user: any; 
                 </div>
               ))}
             </div>
+          </Panel>
+        )}
+
+        {/* Assigned agents roster */}
+        {assignedAgents.length > 0 && (
+          <Panel>
+            <PanelHeader
+              accent="brand"
+              title="Assigned Agents"
+              subtitle={`${onlineCount} online · ${assignedAgents.length - onlineCount} offline`}
+              right={
+                <div className="flex items-center gap-2">
+                  <StatusPill tone="success" label={`${onlineCount} online`} pulse={onlineCount > 0} />
+                  {assignedAgents.length - onlineCount > 0 && (
+                    <StatusPill tone="neutral" label={`${assignedAgents.length - onlineCount} offline`} />
+                  )}
+                </div>
+              }
+            />
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-[var(--bg-card-alt)] border-b border-[var(--border-ui)]">
+                  <th className={TH}>Status</th>
+                  <th className={TH}>Agent Email</th>
+                  <th className={TH}>Machine ID</th>
+                  <th className={TH}>IP Address</th>
+                  <th className={TH}>Bandwidth</th>
+                  <th className={TH}>Last Seen</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[var(--border-ui)]">
+                {assignedAgents.map((agent: any) => {
+                  const online = new Date().getTime() - new Date(agent.last_seen).getTime() < 120000;
+                  const heavy = agent.current_bandwidth > 10 * 1024 * 1024;
+                  return (
+                    <tr key={agent.machine_id} className="hover:bg-[var(--bg-card-alt)] transition-colors">
+                      <td className={TD}>
+                        <StatusPill tone={online ? 'success' : 'neutral'} label={online ? 'Online' : 'Offline'} pulse={online} />
+                      </td>
+                      <td className={TD}>
+                        <span className="font-mono text-sm text-[#c4b5fd]">{agent.username || '—'}</span>
+                      </td>
+                      <td className={TD}>
+                        <span className="font-mono text-xs text-[var(--text-muted)]">{agent.machine_id}</span>
+                      </td>
+                      <td className={TD}>
+                        <span className="font-mono text-xs text-[var(--text-muted)]">{agent.ip_address?.replace('::ffff:', '') || '—'}</span>
+                      </td>
+                      <td className={TD}>
+                        <span className={`tabular-nums font-medium text-sm ${heavy ? 'text-amber-300' : 'text-[var(--text-main)]'}`}>
+                          {formatBytes(agent.current_bandwidth)}/min
+                        </span>
+                      </td>
+                      <td className={`${TD} text-[var(--text-muted)] font-mono text-xs`}>
+                        {format(new Date(agent.last_seen), 'MMM dd, HH:mm:ss')}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </Panel>
         )}
 

@@ -114,15 +114,18 @@ db.serialize(() => {
   // Migration for existing portal_users rows
   db.run("ALTER TABLE portal_users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 1", () => {});
 
-  // Team leads → machines they supervise
+  // Team leads → agents they supervise (keyed by agent email/username)
   db.run(`
     CREATE TABLE IF NOT EXISTS agent_assignments (
       user_id INTEGER NOT NULL,
-      machine_id TEXT NOT NULL,
-      PRIMARY KEY(user_id, machine_id),
+      agent_email TEXT NOT NULL,
+      PRIMARY KEY(user_id, agent_email),
       FOREIGN KEY(user_id) REFERENCES portal_users(id) ON DELETE CASCADE
     )
   `);
+
+  // Migrate existing rows: rename machine_id → agent_email if old schema is present
+  db.run(`ALTER TABLE agent_assignments RENAME COLUMN machine_id TO agent_email`, () => {});
 
   // manager→team_lead or director→manager relationships
   db.run(`
@@ -514,33 +517,64 @@ app.delete('/api/users/:id', async (req, res) => {
   }
 });
 
-// Assign/unassign a machine to a team_lead
-app.post('/api/users/:id/agents', async (req, res) => {
-  const { machine_id } = req.body;
-  if (!machine_id) return res.status(400).json({ error: 'Missing machine_id' });
+// Assign/unassign agents to a team_lead by email
+app.get('/api/users/:id/agents', async (req, res) => {
   try {
-    await dbRun('INSERT OR IGNORE INTO agent_assignments (user_id, machine_id) VALUES (?, ?)', [req.params.id, machine_id]);
+    const rows = await dbAll('SELECT agent_email FROM agent_assignments WHERE user_id = ?', [req.params.id]);
+    res.json(rows.map(r => r.agent_email));
+  } catch {
+    res.status(500).json({ error: 'Failed to fetch agents' });
+  }
+});
+
+app.post('/api/users/:id/agents', async (req, res) => {
+  const { agent_email } = req.body;
+  if (!agent_email) return res.status(400).json({ error: 'Missing agent_email' });
+  try {
+    await dbRun('INSERT OR IGNORE INTO agent_assignments (user_id, agent_email) VALUES (?, ?)', [req.params.id, agent_email.trim().toLowerCase()]);
     res.status(201).json({ status: 'assigned' });
   } catch {
     res.status(500).json({ error: 'Failed to assign agent' });
   }
 });
 
-app.delete('/api/users/:id/agents/:machineId', async (req, res) => {
+// Bulk assign — accepts array of emails
+app.post('/api/users/:id/agents/bulk', async (req, res) => {
+  const { emails } = req.body;
+  if (!Array.isArray(emails) || !emails.length) return res.status(400).json({ error: 'Missing emails array' });
   try {
-    await dbRun('DELETE FROM agent_assignments WHERE user_id = ? AND machine_id = ?', [req.params.id, req.params.machineId]);
+    for (const email of emails) {
+      await dbRun('INSERT OR IGNORE INTO agent_assignments (user_id, agent_email) VALUES (?, ?)', [req.params.id, email.trim().toLowerCase()]);
+    }
+    res.status(201).json({ status: 'assigned', count: emails.length });
+  } catch {
+    res.status(500).json({ error: 'Failed to bulk assign agents' });
+  }
+});
+
+app.delete('/api/users/:id/agents/:email', async (req, res) => {
+  try {
+    await dbRun('DELETE FROM agent_assignments WHERE user_id = ? AND agent_email = ?', [req.params.id, decodeURIComponent(req.params.email)]);
     res.json({ status: 'unassigned' });
   } catch {
     res.status(500).json({ error: 'Failed to unassign agent' });
   }
 });
 
-app.get('/api/users/:id/agents', async (req, res) => {
+// Agents with no Team Lead assignment
+app.get('/api/users/unassigned-agents', async (req, res) => {
   try {
-    const rows = await dbAll('SELECT machine_id FROM agent_assignments WHERE user_id = ?', [req.params.id]);
-    res.json(rows.map(r => r.machine_id));
+    const rows = await dbAll(`
+      SELECT m.machine_id, m.username, m.last_seen, m.ip_address, m.current_bandwidth
+      FROM machines m
+      WHERE m.username IS NOT NULL
+        AND m.username != ''
+        AND LOWER(m.username) NOT IN (SELECT LOWER(agent_email) FROM agent_assignments)
+      ORDER BY m.last_seen DESC
+    `);
+    res.json(rows);
   } catch {
-    res.status(500).json({ error: 'Failed to fetch agents' });
+    res.status(500).json({ error: 'Failed to fetch unassigned agents' });
   }
 });
 
@@ -580,10 +614,21 @@ app.get('/api/users/:id/reports', async (req, res) => {
 });
 
 // ─── Portal dashboard (role-scoped data) ──────────────────────────────────
+
+// Resolves assigned agent emails → machine_ids via the machines table
+async function emailsToMachineIds(emails) {
+  if (!emails.length) return [];
+  const rows = await dbAll(
+    `SELECT machine_id FROM machines WHERE username IN (${emails.map(() => '?').join(',')})`,
+    emails
+  );
+  return [...new Set(rows.map(r => r.machine_id))];
+}
+
 async function getMachineIdsForUser(userId, role) {
   if (role === 'team_lead') {
-    const rows = await dbAll('SELECT machine_id FROM agent_assignments WHERE user_id = ?', [userId]);
-    return rows.map(r => r.machine_id);
+    const rows = await dbAll('SELECT agent_email FROM agent_assignments WHERE user_id = ?', [userId]);
+    return emailsToMachineIds(rows.map(r => r.agent_email));
   }
 
   if (role === 'manager') {
@@ -591,10 +636,10 @@ async function getMachineIdsForUser(userId, role) {
     if (!tls.length) return [];
     const tlIds = tls.map(t => t.child_id);
     const agents = await dbAll(
-      `SELECT machine_id FROM agent_assignments WHERE user_id IN (${tlIds.map(() => '?').join(',')})`,
+      `SELECT agent_email FROM agent_assignments WHERE user_id IN (${tlIds.map(() => '?').join(',')})`,
       tlIds
     );
-    return [...new Set(agents.map(a => a.machine_id))];
+    return emailsToMachineIds([...new Set(agents.map(a => a.agent_email))]);
   }
 
   if (role === 'director') {
@@ -608,10 +653,10 @@ async function getMachineIdsForUser(userId, role) {
     if (!tls.length) return [];
     const tlIds = tls.map(t => t.child_id);
     const agents = await dbAll(
-      `SELECT machine_id FROM agent_assignments WHERE user_id IN (${tlIds.map(() => '?').join(',')})`,
+      `SELECT agent_email FROM agent_assignments WHERE user_id IN (${tlIds.map(() => '?').join(',')})`,
       tlIds
     );
-    return [...new Set(agents.map(a => a.machine_id))];
+    return emailsToMachineIds([...new Set(agents.map(a => a.agent_email))]);
   }
 
   return [];
@@ -657,9 +702,20 @@ app.get('/api/portal/dashboard', requireAuth, async (req, res) => {
       `, [id]);
     }
 
+    // Full machine records for assigned agents (online/offline status)
+    let assignedAgents = [];
+    if (machineIds.length > 0) {
+      const placeholders = machineIds.map(() => '?').join(',');
+      assignedAgents = await dbAll(
+        `SELECT machine_id, username, last_seen, ip_address, current_bandwidth FROM machines WHERE machine_id IN (${placeholders}) ORDER BY last_seen DESC`,
+        machineIds
+      );
+    }
+
     res.json({
       user: { id, name, username, role },
       machineIds,
+      assignedAgents,
       violations,
       recentLogs,
       topDomains,
