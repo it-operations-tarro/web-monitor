@@ -22,9 +22,9 @@ import {
   X,
   UserCog,
   Link2,
-  Unlink,
   Eye,
   EyeOff,
+  TrendingUp,
 } from 'lucide-react';
 import {
   BarChart,
@@ -34,6 +34,7 @@ import {
   Tooltip,
   ResponsiveContainer,
   Cell,
+  CartesianGrid,
 } from 'recharts';
 import { format } from 'date-fns';
 
@@ -102,17 +103,25 @@ function Tile({
   sub,
   tone = 'brand',
   icon,
-}: { title: string; value: React.ReactNode; sub?: React.ReactNode; tone?: Tone; icon?: React.ReactNode }) {
+  index = 0,
+}: { title: string; value: React.ReactNode; sub?: React.ReactNode; tone?: Tone; icon?: React.ReactNode; index?: number }) {
   const t = TONE[tone];
   return (
-    <div className="group relative bg-[var(--bg-card)] border border-[var(--border-ui)] rounded-xl p-5 transition-all duration-200 hover:border-[#6a29e1]/40 hover:shadow-lg hover:shadow-black/30 overflow-hidden cursor-default">
+    <div
+      className="group relative bg-[var(--bg-card)] border border-[var(--border-ui)] rounded-xl p-5 transition-all duration-200 hover:border-[#6a29e1]/40 hover:shadow-xl hover:shadow-black/30 overflow-hidden cursor-default animate-fade-in-up"
+      style={{ animationDelay: `${index * 55}ms` }}
+    >
       {/* Top accent line */}
       <div className={`absolute top-0 left-0 right-0 h-[2px] ${t.bar} opacity-70`} />
       {/* Subtle hover bg glow */}
       <div className="absolute inset-0 bg-gradient-to-br from-[#6a29e1]/0 to-transparent opacity-0 group-hover:opacity-[0.04] transition-opacity duration-300 pointer-events-none" />
       <div className="flex items-start justify-between mb-3">
         <span className="text-[10px] text-[var(--text-muted)] font-bold uppercase tracking-widest">{title}</span>
-        {icon && <span className={`${t.text} opacity-50 group-hover:opacity-80 transition-opacity duration-200`}>{icon}</span>}
+        {icon && (
+          <div className={`flex items-center justify-center w-7 h-7 rounded-lg flex-shrink-0 bg-current/10 ${t.text} opacity-70 group-hover:opacity-100 transition-opacity duration-200`}>
+            {icon}
+          </div>
+        )}
       </div>
       <div className="text-[26px] font-bold text-[var(--text-main)] tabular-nums tracking-tight font-[var(--font-geist-mono)]">{value}</div>
       {sub && <div className="mt-1.5 text-[11px] text-[var(--text-muted)] leading-relaxed">{sub}</div>}
@@ -120,9 +129,26 @@ function Tile({
   );
 }
 
-function Panel({ children, className = '' }: { children: React.ReactNode; className?: string }) {
+function SkeletonTile() {
   return (
-    <div className={`bg-[var(--bg-card)] border border-[var(--border-ui)] rounded-xl overflow-hidden shadow-sm shadow-black/20 ${className}`}>
+    <div className="bg-[var(--bg-card)] border border-[var(--border-ui)] rounded-xl p-5 relative overflow-hidden">
+      <div className="absolute top-0 left-0 right-0 h-[2px] skeleton" />
+      <div className="flex items-start justify-between mb-4">
+        <div className="skeleton h-2 w-20 rounded" />
+        <div className="skeleton w-7 h-7 rounded-lg" />
+      </div>
+      <div className="skeleton h-7 w-24 rounded mb-2.5" />
+      <div className="skeleton h-2 w-28 rounded" />
+    </div>
+  );
+}
+
+function Panel({ children, className = '', style }: { children: React.ReactNode; className?: string; style?: React.CSSProperties }) {
+  return (
+    <div
+      className={`bg-[var(--bg-card)] border border-[var(--border-ui)] rounded-xl overflow-hidden shadow-sm shadow-black/20 ${className}`}
+      style={style}
+    >
       {children}
     </div>
   );
@@ -171,6 +197,44 @@ function NavItem({
   );
 }
 
+function MobileNav({
+  activeTab,
+  setActiveTab,
+}: {
+  activeTab: string;
+  setActiveTab: (tab: 'dashboard' | 'machines' | 'enforcement' | 'users') => void;
+}) {
+  const tabs: { id: 'dashboard' | 'machines' | 'enforcement' | 'users'; icon: React.ReactNode; label: string }[] = [
+    { id: 'dashboard',   icon: <LayoutDashboard size={19} />, label: 'Overview' },
+    { id: 'machines',    icon: <Activity size={19} />,        label: 'Fleet' },
+    { id: 'enforcement', icon: <ShieldCheck size={19} />,     label: 'Enforce' },
+    { id: 'users',       icon: <UserCog size={19} />,         label: 'Users' },
+  ];
+  return (
+    <nav
+      className="fixed bottom-0 left-0 right-0 flex lg:hidden bg-[var(--bg-sidebar)] border-t border-[var(--border-ui)] z-20"
+      aria-label="Mobile navigation"
+    >
+      {tabs.map((tab) => {
+        const isActive = activeTab === tab.id;
+        return (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            aria-current={isActive ? 'page' : undefined}
+            className={`flex-1 flex flex-col items-center justify-center py-3 gap-1 text-[9px] font-bold
+                        uppercase tracking-widest cursor-pointer transition-colors duration-200
+              ${isActive ? 'text-[#a78bfa]' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}
+          >
+            <span className={`transition-transform duration-200 ${isActive ? 'scale-110' : ''}`}>{tab.icon}</span>
+            {tab.label}
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
+
 // ─── page ─────────────────────────────────────────────────────────────────
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'machines' | 'enforcement' | 'users'>('dashboard');
@@ -181,6 +245,7 @@ export default function Dashboard() {
   const [enforcement, setEnforcement] = useState<any>(null);
   const [machineToDelete, setMachineToDelete] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(false);
   const [theme, setTheme] = useState<'light' | 'dark'>('dark');
 
@@ -201,17 +266,18 @@ export default function Dashboard() {
 
   const getBaseUrl = () => `http://${window.location.hostname}:4448`;
 
-  async function fetchData() {
+  async function fetchData(manual = false) {
+    if (manual) setRefreshing(true);
     setError(false);
     try {
       const baseUrl = getBaseUrl();
       const fetchOpts = { cache: 'no-store' as RequestCache };
-
-      const statsRes = await fetch(`${baseUrl}/api/stats`, fetchOpts);
-      const logsRes = await fetch(`${baseUrl}/api/logs?limit=50`, fetchOpts);
-      const machinesRes = await fetch(`${baseUrl}/api/machines`, fetchOpts);
-      const bwRes = await fetch(`${baseUrl}/api/bandwidth-violations?limit=10`, fetchOpts);
-
+      const [statsRes, logsRes, machinesRes, bwRes] = await Promise.all([
+        fetch(`${baseUrl}/api/stats`, fetchOpts),
+        fetch(`${baseUrl}/api/logs?limit=50`, fetchOpts),
+        fetch(`${baseUrl}/api/machines`, fetchOpts),
+        fetch(`${baseUrl}/api/bandwidth-violations?limit=10`, fetchOpts),
+      ]);
       if (statsRes.ok && logsRes.ok && machinesRes.ok && bwRes.ok) {
         setStats(await statsRes.json());
         setLogs(await logsRes.json());
@@ -220,7 +286,6 @@ export default function Dashboard() {
       } else {
         setError(true);
       }
-
       // Enforcement endpoint is optional — pre-update collectors don't expose it.
       try {
         const enforcementRes = await fetch(`${baseUrl}/api/enforcement`, fetchOpts);
@@ -230,6 +295,7 @@ export default function Dashboard() {
       setError(true);
     } finally {
       setLoading(false);
+      if (manual) setRefreshing(false);
     }
   }
 
@@ -269,19 +335,40 @@ export default function Dashboard() {
 
   if (loading && !stats) {
     return (
-      <div className="flex items-center justify-center bg-[var(--bg-page)] text-[var(--text-main)] h-screen">
-        <div className="flex items-center gap-3 text-sm text-[var(--text-muted)]">
-          <RefreshCw className="animate-spin" size={16} />
-          Loading monitor…
-        </div>
+      <div className="min-h-screen bg-[var(--bg-page)]">
+        <aside className="fixed left-0 top-0 h-full w-60 bg-[var(--bg-sidebar)] border-r border-[var(--border-ui)] hidden lg:block" />
+        <main className="lg:ml-60 px-4 sm:px-6 lg:px-8 py-6 pb-24 lg:pb-8">
+          <div className="mb-7">
+            <div className="skeleton h-2 w-32 rounded mb-3" />
+            <div className="skeleton h-6 w-64 rounded mb-2" />
+            <div className="skeleton h-2 w-80 rounded" />
+          </div>
+          <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 mb-4">
+            {[0, 1, 2, 3].map((i) => <SkeletonTile key={i} />)}
+          </div>
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
+            <div className="xl:col-span-2 skeleton h-[300px] rounded-xl" />
+            <div className="skeleton h-[300px] rounded-xl" />
+          </div>
+        </main>
       </div>
     );
   }
 
   return (
+    <>
+      {/* ─── Skip link ──────────────────────────────────────────────── */}
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-[100]
+                   focus:px-4 focus:py-2 focus:bg-[#6a29e1] focus:text-white focus:rounded-lg
+                   focus:text-sm focus:font-semibold focus:shadow-xl"
+      >
+        Skip to main content
+      </a>
     <div className="min-h-screen bg-[var(--bg-page)] text-[var(--text-main)] transition-colors duration-300">
       {/* ─── sidebar ─────────────────────────────────────────────────── */}
-      <aside className="fixed left-0 top-0 h-full w-60 bg-[var(--bg-sidebar)] border-r border-[var(--border-ui)] hidden lg:flex flex-col transition-colors duration-300">
+      <aside className="fixed left-0 top-0 h-full w-60 bg-[var(--bg-sidebar)] border-r border-[var(--border-ui)] hidden lg:flex flex-col transition-colors duration-300 z-30">
         {/* Top purple glow line */}
         <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#6a29e1]/70 to-transparent" />
 
@@ -312,7 +399,7 @@ export default function Dashboard() {
       </aside>
 
       {/* ─── main ───────────────────────────────────────────────────── */}
-      <main className="lg:ml-60 px-6 lg:px-8 py-6">
+      <main id="main-content" className="lg:ml-60 px-4 sm:px-6 lg:px-8 py-6 pb-24 lg:pb-10">
         {/* topbar */}
         <header className="flex flex-col md:flex-row md:items-end justify-between gap-3 mb-7">
           <div className="min-w-0">
@@ -328,16 +415,19 @@ export default function Dashboard() {
             <StatusPill tone={error ? 'danger' : 'success'} label={error ? 'Collector unreachable' : 'Live · 10s'} pulse={!error} />
             <button
               onClick={toggleTheme}
-              aria-label="Toggle theme"
+              aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
               className="cursor-pointer p-2 rounded-lg border border-[var(--border-ui)] bg-[var(--bg-card)] hover:bg-[var(--bg-card-alt)] hover:border-[#6a29e1]/40 transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#6a29e1]/50"
             >
               {theme === 'dark' ? <Sun size={13} /> : <Moon size={13} />}
             </button>
             <button
-              onClick={fetchData}
-              className="cursor-pointer flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--border-ui)] bg-[var(--bg-card)] text-xs font-semibold hover:bg-[var(--bg-card-alt)] hover:border-[#6a29e1]/50 transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#6a29e1]/50"
+              onClick={() => fetchData(true)}
+              disabled={refreshing}
+              aria-label="Refresh dashboard data"
+              className="cursor-pointer flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--border-ui)] bg-[var(--bg-card)] text-xs font-semibold hover:bg-[var(--bg-card-alt)] hover:border-[#6a29e1]/50 transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#6a29e1]/50 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <RefreshCw size={12} /> Refresh
+              <RefreshCw size={12} className={refreshing ? 'animate-spin' : ''} />
+              {refreshing ? 'Loading…' : 'Refresh'}
             </button>
           </div>
         </header>
@@ -349,44 +439,52 @@ export default function Dashboard() {
           </div>
         )}
 
-        {activeTab === 'dashboard' && (
-          <OverviewTab
-            stats={stats}
-            logs={logs}
-            machines={machines}
-            bwViolations={bwViolations}
-            onlineCount={onlineCount}
-            detectionRatio={detectionRatio}
-          />
-        )}
-        {activeTab === 'machines' && <MachineStatusView machines={machines} onDelete={setMachineToDelete} />}
-        {activeTab === 'enforcement' && <EnforcementView data={enforcement} getBaseUrl={getBaseUrl} onRefresh={fetchData} />}
-        {activeTab === 'users' && <UserManagementTab getBaseUrl={getBaseUrl} />}
+        {/* Tab content — key triggers fade-in on tab switch */}
+        <div key={activeTab} className="animate-fade-in-up">
+          {activeTab === 'dashboard' && (
+            <OverviewTab
+              stats={stats}
+              logs={logs}
+              machines={machines}
+              bwViolations={bwViolations}
+              onlineCount={onlineCount}
+              detectionRatio={detectionRatio}
+            />
+          )}
+          {activeTab === 'machines' && <MachineStatusView machines={machines} onDelete={setMachineToDelete} />}
+          {activeTab === 'enforcement' && <EnforcementView data={enforcement} getBaseUrl={getBaseUrl} onRefresh={fetchData} />}
+          {activeTab === 'users' && <UserManagementTab getBaseUrl={getBaseUrl} />}
+        </div>
 
         {/* delete modal */}
         {machineToDelete && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
-            <div className="bg-[var(--bg-card)] border border-[var(--border-ui)] rounded-lg p-6 max-w-md w-full shadow-2xl">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="p-2 bg-rose-500/15 border border-rose-500/30 rounded-md">
-                  <AlertTriangle size={18} className="text-rose-300" />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
+            <div className="bg-[var(--bg-card)] border border-[var(--border-ui)] rounded-2xl p-6 max-w-md w-full shadow-2xl animate-scale-in">
+              <div className="flex items-start gap-4 mb-5">
+                <div className="flex-shrink-0 p-2.5 bg-rose-500/10 border border-rose-500/20 rounded-xl">
+                  <AlertTriangle size={18} className="text-rose-400" />
                 </div>
-                <h3 className="text-base font-semibold text-[var(--text-main)]">Remove workstation</h3>
+                <div className="min-w-0">
+                  <h2 className="text-[15px] font-bold text-[var(--text-main)]">Remove workstation</h2>
+                  <p className="text-sm text-[var(--text-muted)] mt-1.5 leading-relaxed">
+                    Remove{' '}
+                    <code className="font-mono text-[var(--text-main)] bg-[var(--bg-card-alt)] px-1.5 py-0.5 rounded text-xs">
+                      {machineToDelete}
+                    </code>{' '}
+                    from the dashboard? It will reappear on its next heartbeat.
+                  </p>
+                </div>
               </div>
-              <p className="text-sm text-[var(--text-muted)] mb-6 leading-relaxed">
-                Remove <span className="font-mono text-[var(--text-main)]">{machineToDelete}</span> from the dashboard?
-                It will reappear on its next heartbeat.
-              </p>
               <div className="flex gap-2 justify-end">
                 <button
                   onClick={() => setMachineToDelete(null)}
-                  className="px-3 py-1.5 text-sm rounded-md border border-[var(--border-ui)] bg-[var(--bg-card-alt)] hover:bg-[var(--border-ui)] transition-colors"
+                  className="cursor-pointer px-4 py-2 text-sm rounded-lg border border-[var(--border-ui)] bg-[var(--bg-card-alt)] hover:bg-[var(--border-ui)] transition-colors font-medium"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleDeleteMachine}
-                  className="px-3 py-1.5 text-sm rounded-md bg-rose-600 hover:bg-rose-500 text-white font-medium transition-colors"
+                  className="cursor-pointer px-4 py-2 text-sm rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-semibold transition-colors"
                 >
                   Remove
                 </button>
@@ -395,7 +493,12 @@ export default function Dashboard() {
           </div>
         )}
       </main>
+
+      {/* ─── Mobile bottom nav ──────────────────────────────────────── */}
+      <MobileNav activeTab={activeTab} setActiveTab={setActiveTab} />
+
     </div>
+    </>
   );
 }
 
@@ -430,32 +533,10 @@ function OverviewTab({
     <div className="space-y-6">
       {/* KPI strip */}
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
-        <Tile
-          title="Total Sessions"
-          value={(stats?.totalLogs || 0).toLocaleString()}
-          tone="brand"
-          icon={<Globe size={14} />}
-        />
-        <Tile
-          title="Policy Violations"
-          value={(stats?.totalViolations || 0).toLocaleString()}
-          tone="danger"
-          sub={`${detectionRatio}% of traffic flagged`}
-          icon={<AlertTriangle size={14} />}
-        />
-        <Tile
-          title="Active Machines"
-          value={`${onlineCount} / ${machines.length || stats?.uniqueMachines || 0}`}
-          tone="success"
-          sub="Heartbeat within 2 min"
-          icon={<Monitor size={14} />}
-        />
-        <Tile
-          title="Detection Ratio"
-          value={`${detectionRatio}%`}
-          tone="info"
-          icon={<Activity size={14} />}
-        />
+        <Tile index={0} title="Total Sessions"    value={(stats?.totalLogs || 0).toLocaleString()}       tone="brand"   icon={<Globe size={13} />} />
+        <Tile index={1} title="Policy Violations" value={(stats?.totalViolations || 0).toLocaleString()} tone="danger"  icon={<AlertTriangle size={13} />} sub={`${detectionRatio}% of traffic flagged`} />
+        <Tile index={2} title="Active Machines"   value={`${onlineCount} / ${machines.length || stats?.uniqueMachines || 0}`} tone="success" icon={<Monitor size={13} />} sub="Heartbeat within 2 min" />
+        <Tile index={3} title="Detection Ratio"   value={`${detectionRatio}%`} tone="info" icon={<TrendingUp size={13} />} />
       </div>
 
       {/* bandwidth banner */}
@@ -522,23 +603,37 @@ function OverviewTab({
           <PanelHeader title="Top Domain Traffic" subtitle="Aggregate across all workstations" />
           <div className="p-4 h-[300px]">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={stats?.topDomains || []}>
-                <XAxis dataKey="domain" stroke="#64748b" fontSize={11} tickLine={false} axisLine={false} />
-                <YAxis stroke="#64748b" fontSize={11} tickLine={false} axisLine={false} />
+              <BarChart data={stats?.topDomains || []} margin={{ top: 4, right: 4, bottom: 0, left: -8 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-ui)" vertical={false} />
+                <XAxis
+                  dataKey="domain"
+                  fontSize={10}
+                  tickLine={false}
+                  axisLine={false}
+                  tick={{ fill: 'var(--text-muted)', fontWeight: 500 }}
+                />
+                <YAxis
+                  fontSize={10}
+                  tickLine={false}
+                  axisLine={false}
+                  tick={{ fill: 'var(--text-muted)' }}
+                />
                 <Tooltip
-                  cursor={{ fill: 'rgba(106,41,225,0.05)' }}
+                  cursor={{ fill: 'rgba(106,41,225,0.06)' }}
                   contentStyle={{
                     backgroundColor: 'var(--bg-card)',
                     border: '1px solid var(--border-ui)',
-                    borderRadius: '8px',
+                    borderRadius: '10px',
                     color: 'var(--text-main)',
                     fontSize: '12px',
+                    boxShadow: '0 16px 40px rgba(0,0,0,0.5)',
+                    fontWeight: 500,
                   }}
                   itemStyle={{ color: '#a78bfa' }}
                 />
-                <Bar dataKey="count" radius={[3, 3, 0, 0]}>
-                  {stats?.topDomains?.map((_: any, i: number) => (
-                    <Cell key={i} fill={i === 0 ? '#6a29e1' : '#3b2470'} />
+                <Bar dataKey="count" radius={[4, 4, 0, 0]} maxBarSize={44} animationDuration={700} animationEasing="ease-out">
+                  {(stats?.topDomains || []).map((_: any, i: number) => (
+                    <Cell key={i} fill={i === 0 ? '#6a29e1' : i === 1 ? '#4a1fa1' : '#2e1470'} fillOpacity={i === 0 ? 1 : 0.75} />
                   ))}
                 </Bar>
               </BarChart>
@@ -590,12 +685,13 @@ function OverviewTab({
       </div>
 
       {/* bandwidth history */}
-      <Panel>
+      <Panel className="animate-fade-in-up" style={{ animationDelay: '180ms' }}>
         <PanelHeader
           accent="warn"
           title="Recent Bandwidth Violations"
           subtitle="Workstations exceeding the per-minute byte threshold"
         />
+        <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse">
           <thead>
             <tr className="bg-[var(--bg-card-alt)] border-b border-[var(--border-ui)]">
@@ -631,6 +727,7 @@ function OverviewTab({
             )}
           </tbody>
         </table>
+        </div>
       </Panel>
     </div>
   );
@@ -646,23 +743,21 @@ function MachineStatusView({ machines, onDelete }: { machines: any[]; onDelete: 
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
-        <Tile title="Total Workstations" value={machines.length} tone="brand" icon={<Monitor size={14} />} />
-        <Tile title="Online" value={onlineCount} tone="success" sub="Heartbeat within 2 min" />
-        <Tile title="Offline" value={offlineCount} tone="neutral" />
+        <Tile index={0} title="Total Workstations" value={machines.length} tone="brand" icon={<Monitor size={13} />} />
+        <Tile index={1} title="Online" value={onlineCount} tone="success" sub="Heartbeat within 2 min" />
+        <Tile index={2} title="Offline" value={offlineCount} tone="neutral" />
         <Tile
+          index={3}
           title="Avg Bandwidth"
-          value={
-            machines.length
-              ? formatBytes(machines.reduce((sum, m) => sum + (m.current_bandwidth || 0), 0) / machines.length) + '/min'
-              : '0 B/min'
-          }
+          value={machines.length ? formatBytes(machines.reduce((sum, m) => sum + (m.current_bandwidth || 0), 0) / machines.length) + '/min' : '0 B/min'}
           tone="info"
-          icon={<Gauge size={14} />}
+          icon={<Gauge size={13} />}
         />
       </div>
 
-      <Panel>
+      <Panel className="animate-fade-in-up" style={{ animationDelay: '80ms' }}>
         <PanelHeader title="Workstation Fleet" subtitle={`${machines.length} registered agent${machines.length === 1 ? '' : 's'}`} />
+        <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse">
           <thead>
             <tr className="bg-[var(--bg-card-alt)] border-b border-[var(--border-ui)]">
@@ -704,8 +799,8 @@ function MachineStatusView({ machines, onDelete }: { machines: any[]; onDelete: 
                   <td className={`${TD} text-right`}>
                     <button
                       onClick={() => onDelete(m.machine_id)}
-                      className="p-1.5 text-[var(--text-muted)] hover:text-rose-300 hover:bg-rose-500/10 rounded-md transition-colors opacity-0 group-hover:opacity-100"
-                      title="Remove workstation"
+                      aria-label={`Remove workstation ${m.machine_id}`}
+                      className="p-1.5 text-[var(--text-muted)] hover:text-rose-300 hover:bg-rose-500/10 rounded-md transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 cursor-pointer"
                     >
                       <Trash2 size={14} />
                     </button>
@@ -722,6 +817,7 @@ function MachineStatusView({ machines, onDelete }: { machines: any[]; onDelete: 
             )}
           </tbody>
         </table>
+        </div>
       </Panel>
     </div>
   );
@@ -837,9 +933,9 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <Tile title="Blocked Domains" value={totalBlockedDomains.toLocaleString()} tone="brand" icon={<ShieldCheck size={14} />} />
-        <Tile title="Active Categories" value={enabledCategories.length} tone="success" icon={<ListChecks size={14} />} />
-        <Tile title="Manual Entries" value={manualBlacklist.length} tone="danger" icon={<AlertTriangle size={14} />} />
+        <Tile index={0} title="Blocked Domains"   value={totalBlockedDomains.toLocaleString()} tone="brand"   icon={<ShieldCheck size={13} />} />
+        <Tile index={1} title="Active Categories" value={enabledCategories.length}              tone="success" icon={<ListChecks size={13} />} />
+        <Tile index={2} title="Manual Entries"    value={manualBlacklist.length}                tone="danger"  icon={<AlertTriangle size={13} />} />
       </div>
 
       {/* ── Add domains ─────────────────────────────────────────────────── */}
@@ -901,6 +997,7 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
             )
           }
         />
+        <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse">
           <thead>
             <tr className="bg-[var(--bg-card-alt)] border-b border-[var(--border-ui)]">
@@ -958,6 +1055,7 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
           </tbody>
         </table>
 
+        </div>
         {/* Add new category */}
         <div className="px-5 py-3 border-t border-[var(--border-ui)] bg-[var(--bg-card-alt)] flex items-center gap-2">
           <input
@@ -981,6 +1079,7 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
         <Panel>
           <PanelHeader accent="danger" title="Top Offending Domains" subtitle="Most-hit blocked domains" />
+          <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-[var(--bg-card-alt)] border-b border-[var(--border-ui)]">
@@ -991,10 +1090,10 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
             </thead>
             <tbody className="divide-y divide-[var(--border-ui)]">
               {topOffendingDomains.map((d: any) => (
-                <tr key={d.domain} className="hover:bg-rose-500/5 transition-colors">
+                <tr key={d.domain} className="hover:bg-rose-500/5 transition-colors duration-150">
                   <td className={TD}><span className="font-mono text-xs text-[var(--text-main)] truncate">{d.domain}</span></td>
                   <td className={TD}><CategoryTag category={d.category} /></td>
-                  <td className={`${TD} text-right`}><span className="text-rose-300 font-semibold tabular-nums">{d.count}</span></td>
+                  <td className={`${TD} text-right`}><span className="text-rose-300 font-bold tabular-nums">{d.count}</span></td>
                 </tr>
               ))}
               {topOffendingDomains.length === 0 && (
@@ -1002,10 +1101,12 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
               )}
             </tbody>
           </table>
+          </div>
         </Panel>
 
         <Panel>
           <PanelHeader accent="brand" title="Top Offending Agents" subtitle="Users with the most flagged events" />
+          <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-[var(--bg-card-alt)] border-b border-[var(--border-ui)]">
@@ -1016,10 +1117,10 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
             </thead>
             <tbody className="divide-y divide-[var(--border-ui)]">
               {topOffendingUsers.map((u: any) => (
-                <tr key={u.username} className="hover:bg-[var(--bg-card-alt)] transition-colors">
+                <tr key={u.username} className="hover:bg-[var(--bg-card-alt)] transition-colors duration-150">
                   <td className={TD}><span className="text-[#c4b5fd] font-mono text-xs">{u.username}</span></td>
                   <td className={TD}><span className="font-mono text-xs text-[var(--text-muted)]">{u.machine_id}</span></td>
-                  <td className={`${TD} text-right`}><span className="text-rose-300 font-semibold tabular-nums">{u.count}</span></td>
+                  <td className={`${TD} text-right`}><span className="text-rose-300 font-bold tabular-nums">{u.count}</span></td>
                 </tr>
               ))}
               {topOffendingUsers.length === 0 && (
@@ -1027,6 +1128,7 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
               )}
             </tbody>
           </table>
+          </div>
         </Panel>
       </div>
 
@@ -1225,6 +1327,7 @@ function UnassignedAgentsPanel({
         </div>
       )}
 
+      <div className="overflow-x-auto">
       <table className="w-full text-left border-collapse">
         <thead>
           <tr className="bg-[var(--bg-card-alt)] border-b border-[var(--border-ui)]">
@@ -1285,6 +1388,7 @@ function UnassignedAgentsPanel({
           })}
         </tbody>
       </table>
+      </div>
     </Panel>
   );
 }
@@ -1624,10 +1728,10 @@ function UserManagementTab({ getBaseUrl }: { getBaseUrl: () => string }) {
     <div className="space-y-4">
       {/* summary tiles */}
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
-        <Tile title="Total Portal Users" value={users.length} tone="brand" icon={<Users size={14} />} />
-        <Tile title="Team Leads" value={users.filter(u => u.role === 'team_lead').length} tone="info" />
-        <Tile title="Managers" value={users.filter(u => u.role === 'manager').length} tone="warn" />
-        <Tile title="Directors" value={users.filter(u => u.role === 'director').length} tone="brand" />
+        <Tile index={0} title="Total Portal Users" value={users.length}                                   tone="brand"   icon={<Users size={13} />} />
+        <Tile index={1} title="Team Leads"          value={users.filter(u => u.role === 'team_lead').length} tone="info" />
+        <Tile index={2} title="Managers"            value={users.filter(u => u.role === 'manager').length}   tone="warn" />
+        <Tile index={3} title="Directors"           value={users.filter(u => u.role === 'director').length}  tone="brand" />
       </div>
 
       {/* create user panel */}
@@ -1708,6 +1812,7 @@ function UserManagementTab({ getBaseUrl }: { getBaseUrl: () => string }) {
         )}
 
         {/* user table */}
+        <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse">
           <thead>
             <tr className="bg-[var(--bg-card-alt)] border-b border-[var(--border-ui)]">
@@ -1866,6 +1971,7 @@ function UserManagementTab({ getBaseUrl }: { getBaseUrl: () => string }) {
             ))}
           </tbody>
         </table>
+        </div>
       </Panel>
 
       <UnassignedAgentsPanel getBaseUrl={getBaseUrl} teamLeads={teamLeads} onAssigned={fetchUsers} />

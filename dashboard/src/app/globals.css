@@ -68,6 +68,14 @@ body {
   from { opacity: 0; transform: translateY(4px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.95); }
+  to   { opacity: 1; transform: scale(1); }
+}
 @keyframes statusGlow {
   0%, 100% { box-shadow: 0 0 4px currentColor; }
   50%       { box-shadow: 0 0 10px currentColor; }
@@ -80,7 +88,9 @@ body {
   border-radius: 6px;
 }
 
-.fade-in { animation: fadeIn 0.2s ease forwards; }
+.fade-in          { animation: fadeIn    0.2s  ease         both; }
+.animate-fade-in-up { animation: fadeInUp 0.32s ease-out     both; }
+.animate-scale-in   { animation: scaleIn  0.2s  ease-out     both; }
 
 /* ─── Glow utilities ────────────────────────────────────────────────────── */
 .glow-purple { box-shadow: 0 0 20px rgba(106, 41, 225, 0.25), 0 0 40px rgba(106, 41, 225, 0.1); }
@@ -94,6 +104,11 @@ body {
 .dot-glow-warn    { filter: drop-shadow(0 0 4px #f59e0b); }
 
 /* ─── Accessibility: focus rings ────────────────────────────────────────── */
+:focus-visible {
+  outline: 2px solid rgba(106, 41, 225, 0.8);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
 .focus-ring:focus-visible {
   outline: 2px solid rgba(106, 41, 225, 0.7);
   outline-offset: 2px;
