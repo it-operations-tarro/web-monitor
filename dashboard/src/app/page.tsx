@@ -773,7 +773,7 @@ function MachineStatusView({
   const [inspectHasMore, setInspectHasMore]       = useState(true);
   const [inspectLogsLoading, setInspectLogsLoading] = useState(false);
   const [inspectDate, setInspectDate]             = useState<string>(todayStr());
-  const LOG_PAGE_SIZE = 50;
+  const LOG_PAGE_SIZE = 15;
 
   /* ── Load team leads on mount ── */
   useEffect(() => {
@@ -803,7 +803,7 @@ function MachineStatusView({
     setInspectDetail(null);
     setInspectLogs([]);
     setInspectLogPage(0);
-    setInspectHasMore(true);
+    setInspectHasMore(false);
     setInspectLogFilter('all');
     setInspectDate(today);
     setInspectLoading(true);
@@ -812,34 +812,35 @@ function MachineStatusView({
       const base  = getBaseUrl();
       const [statsRes, logsRes] = await Promise.all([
         fetch(`${base}/api/agents/${email}/stats`, { cache: 'no-store' }),
-        fetch(`${base}/api/agents/${email}/logs?limit=${LOG_PAGE_SIZE}&offset=0&date=${today}`, { cache: 'no-store' }),
+        fetch(`${base}/api/agents/${email}/logs?limit=${LOG_PAGE_SIZE + 1}&offset=0&date=${today}`, { cache: 'no-store' }),
       ]);
       if (statsRes.ok) setInspectDetail(await statsRes.json());
       if (logsRes.ok) {
-        const rows = await logsRes.json();
-        setInspectLogs(rows);
-        setInspectHasMore(rows.length === LOG_PAGE_SIZE);
+        const rows: any[] = await logsRes.json();
+        setInspectHasMore(rows.length > LOG_PAGE_SIZE);
+        setInspectLogs(rows.slice(0, LOG_PAGE_SIZE));
       }
     } catch {}
     setInspectLoading(false);
   };
 
-  const fetchInspectLogs = async (filter: 'all' | 'violations', page: number, date: string, replace = false) => {
+  // Always replaces the current page (no append — pure page navigation)
+  const fetchInspectLogs = async (filter: 'all' | 'violations', page: number, date: string) => {
     if (!inspectMachine) return;
     setInspectLogsLoading(true);
     try {
       const email  = encodeURIComponent(inspectMachine.username);
       const params = new URLSearchParams({
-        limit:  String(LOG_PAGE_SIZE),
+        limit:  String(LOG_PAGE_SIZE + 1),
         offset: String(page * LOG_PAGE_SIZE),
         date,
         ...(filter === 'violations' ? { filter: 'violations' } : {}),
       });
       const res = await fetch(`${getBaseUrl()}/api/agents/${email}/logs?${params}`, { cache: 'no-store' });
       if (res.ok) {
-        const rows = await res.json();
-        setInspectLogs(prev => replace ? rows : [...prev, ...rows]);
-        setInspectHasMore(rows.length === LOG_PAGE_SIZE);
+        const rows: any[] = await res.json();
+        setInspectHasMore(rows.length > LOG_PAGE_SIZE);
+        setInspectLogs(rows.slice(0, LOG_PAGE_SIZE));
       }
     } catch {}
     setInspectLogsLoading(false);
@@ -848,19 +849,18 @@ function MachineStatusView({
   const handleFilterChange = (f: 'all' | 'violations') => {
     setInspectLogFilter(f);
     setInspectLogPage(0);
-    fetchInspectLogs(f, 0, inspectDate, true);
+    fetchInspectLogs(f, 0, inspectDate);
   };
 
   const handleDateChange = (d: string) => {
     setInspectDate(d);
     setInspectLogPage(0);
-    fetchInspectLogs(inspectLogFilter, 0, d, true);
+    fetchInspectLogs(inspectLogFilter, 0, d);
   };
 
-  const handleLoadMore = () => {
-    const next = inspectLogPage + 1;
-    setInspectLogPage(next);
-    fetchInspectLogs(inspectLogFilter, next, inspectDate, false);
+  const handleLogPageChange = (newPage: number) => {
+    setInspectLogPage(newPage);
+    fetchInspectLogs(inspectLogFilter, newPage, inspectDate);
   };
 
   /* ── Derived lists ── */
@@ -1335,19 +1335,26 @@ function MachineStatusView({
                         </tbody>
                       </table>
                     </div>
-                    {inspectHasMore && !inspectLogsLoading && inspectLogs.length > 0 && (
-                      <div className="px-4 py-3 border-t border-[var(--border-ui)] flex justify-center">
+                    {/* Pagination */}
+                    {(inspectLogPage > 0 || inspectHasMore) && (
+                      <div className="px-4 py-3 border-t border-[var(--border-ui)] flex items-center justify-between gap-3">
                         <button
-                          onClick={handleLoadMore}
-                          className="cursor-pointer flex items-center gap-1.5 px-4 py-1.5 text-[11px] font-semibold rounded-lg border border-[var(--border-ui)] bg-[var(--bg-card)] hover:border-[#6a29e1]/50 hover:bg-[#6a29e1]/10 text-[var(--text-muted)] hover:text-[#c4b5fd] transition-all duration-150"
+                          onClick={() => handleLogPageChange(inspectLogPage - 1)}
+                          disabled={inspectLogPage === 0 || inspectLogsLoading}
+                          className="cursor-pointer flex items-center gap-1 px-3 py-1.5 rounded-lg border border-[var(--border-ui)] bg-[var(--bg-card)] text-xs font-medium text-[var(--text-muted)] hover:text-[var(--text-main)] hover:border-[#6a29e1]/40 disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-150"
                         >
-                          <ChevronDown size={12} />Load more
+                          <ChevronLeft size={13} />Previous
                         </button>
-                      </div>
-                    )}
-                    {!inspectHasMore && inspectLogs.length > 0 && (
-                      <div className="px-4 py-2.5 border-t border-[var(--border-ui)] text-center text-[11px] text-[var(--text-muted)] italic">
-                        All {inspectLogs.length} records shown
+                        <span className="text-[11px] text-[var(--text-muted)] tabular-nums">
+                          Page {inspectLogPage + 1}
+                        </span>
+                        <button
+                          onClick={() => handleLogPageChange(inspectLogPage + 1)}
+                          disabled={!inspectHasMore || inspectLogsLoading}
+                          className="cursor-pointer flex items-center gap-1 px-3 py-1.5 rounded-lg border border-[var(--border-ui)] bg-[var(--bg-card)] text-xs font-medium text-[var(--text-muted)] hover:text-[var(--text-main)] hover:border-[#6a29e1]/40 disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-150"
+                        >
+                          Next<ChevronRight size={13} />
+                        </button>
                       </div>
                     )}
                   </div>
