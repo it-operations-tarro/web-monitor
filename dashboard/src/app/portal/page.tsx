@@ -16,6 +16,13 @@ import {
   Users,
   Monitor,
   Activity,
+  Search,
+  X,
+  Filter,
+  TrendingUp,
+  ChevronDown,
+  BarChart2,
+  Clock,
 } from 'lucide-react';
 import {
   BarChart,
@@ -239,10 +246,21 @@ function LoginForm({ onLogin }: { onLogin: (token: string, user: any) => void })
 
 // ─── portal dashboard ─────────────────────────────────────────────────────
 function PortalDashboard({ token, user, onLogout }: { token: string; user: any; onLogout: () => void }) {
-  const [data, setData] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
-  const [theme, setTheme] = useState<'light' | 'dark'>('dark');
+  const [data, setData]                     = useState<any>(null);
+  const [loading, setLoading]               = useState(true);
+  const [error, setError]                   = useState(false);
+  const [theme, setTheme]                   = useState<'light' | 'dark'>('dark');
+  /* Agent inspect state */
+  const [inspectAgent, setInspectAgent]     = useState<any | null>(null);
+  const [inspectDetail, setInspectDetail]   = useState<any | null>(null);
+  const [inspectLogs, setInspectLogs]       = useState<any[]>([]);
+  const [inspectLoading, setInspectLoading] = useState(false);
+  const [inspectLogFilter, setInspectLogFilter] = useState<'all' | 'violations'>('all');
+  const [inspectLogPage, setInspectLogPage] = useState(0);
+  const [inspectHasMore, setInspectHasMore] = useState(true);
+  const [inspectLogsLoading, setInspectLogsLoading] = useState(false);
+  const [agentSearch, setAgentSearch]       = useState('');
+  const LOG_PAGE_SIZE = 50;
 
   const getBaseUrl = () => `http://${window.location.hostname}:4448`;
 
@@ -280,6 +298,64 @@ function PortalDashboard({ token, user, onLogout }: { token: string; user: any; 
     const interval = setInterval(fetchData, 10000);
     return () => clearInterval(interval);
   }, [fetchData]);
+
+  /* ── Agent inspection helpers ── */
+  const openInspect = async (agent: any) => {
+    setInspectAgent(agent);
+    setInspectDetail(null);
+    setInspectLogs([]);
+    setInspectLogPage(0);
+    setInspectHasMore(true);
+    setInspectLogFilter('all');
+    setInspectLoading(true);
+    try {
+      const email = encodeURIComponent(agent.username);
+      const base  = getBaseUrl();
+      const [statsRes, logsRes] = await Promise.all([
+        fetch(`${base}/api/agents/${email}/stats`,                                { cache: 'no-store' }),
+        fetch(`${base}/api/agents/${email}/logs?limit=${LOG_PAGE_SIZE}&offset=0`, { cache: 'no-store' }),
+      ]);
+      if (statsRes.ok) setInspectDetail(await statsRes.json());
+      if (logsRes.ok) {
+        const rows = await logsRes.json();
+        setInspectLogs(rows);
+        setInspectHasMore(rows.length === LOG_PAGE_SIZE);
+      }
+    } catch {}
+    setInspectLoading(false);
+  };
+
+  const fetchInspectLogs = async (filter: 'all' | 'violations', page: number, replace = false) => {
+    if (!inspectAgent) return;
+    setInspectLogsLoading(true);
+    try {
+      const email  = encodeURIComponent(inspectAgent.username);
+      const params = new URLSearchParams({
+        limit: String(LOG_PAGE_SIZE),
+        offset: String(page * LOG_PAGE_SIZE),
+        ...(filter === 'violations' ? { filter: 'violations' } : {}),
+      });
+      const res = await fetch(`${getBaseUrl()}/api/agents/${email}/logs?${params}`, { cache: 'no-store' });
+      if (res.ok) {
+        const rows = await res.json();
+        setInspectLogs(prev => replace ? rows : [...prev, ...rows]);
+        setInspectHasMore(rows.length === LOG_PAGE_SIZE);
+      }
+    } catch {}
+    setInspectLogsLoading(false);
+  };
+
+  const handleInspectFilterChange = (f: 'all' | 'violations') => {
+    setInspectLogFilter(f);
+    setInspectLogPage(0);
+    fetchInspectLogs(f, 0, true);
+  };
+
+  const handleInspectLoadMore = () => {
+    const next = inspectLogPage + 1;
+    setInspectLogPage(next);
+    fetchInspectLogs(inspectLogFilter, next, false);
+  };
 
   const roleMeta = ROLE_META[user.role] || { label: user.role, tone: 'neutral' as Tone };
 
@@ -400,7 +476,7 @@ function PortalDashboard({ token, user, onLogout }: { token: string; user: any; 
           </Panel>
         )}
 
-        {/* Assigned agents roster */}
+        {/* ── Assigned Agents — enhanced card grid ── */}
         {assignedAgents.length > 0 && (
           <Panel>
             <PanelHeader
@@ -416,49 +492,317 @@ function PortalDashboard({ token, user, onLogout }: { token: string; user: any; 
                 </div>
               }
             />
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-[var(--bg-card-alt)] border-b border-[var(--border-ui)]">
-                  <th className={TH}>Status</th>
-                  <th className={TH}>Agent Email</th>
-                  <th className={TH}>Machine ID</th>
-                  <th className={TH}>IP Address</th>
-                  <th className={TH}>Bandwidth</th>
-                  <th className={TH}>Last Seen</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[var(--border-ui)]">
-                {assignedAgents.map((agent: any) => {
+            {/* Search */}
+            <div className="px-4 py-3 border-b border-[var(--border-ui)] flex items-center gap-3">
+              <div className="relative flex-1 max-w-sm">
+                <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] pointer-events-none" />
+                <input
+                  type="text"
+                  placeholder="Filter agents…"
+                  value={agentSearch}
+                  onChange={e => setAgentSearch(e.target.value)}
+                  className="w-full bg-[var(--bg-page)] border border-[var(--border-ui)] rounded-lg pl-8 pr-3 py-1.5 text-xs text-[var(--text-main)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[#6a29e1]/60 transition-colors"
+                />
+                {agentSearch && (
+                  <button onClick={() => setAgentSearch('')} className="cursor-pointer absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-main)]">
+                    <X size={11} />
+                  </button>
+                )}
+              </div>
+              <span className="text-[11px] text-[var(--text-muted)]">
+                {assignedAgents.filter(a => !agentSearch || (a.username || '').toLowerCase().includes(agentSearch.toLowerCase()) || (a.machine_id || '').toLowerCase().includes(agentSearch.toLowerCase())).length} agent(s)
+              </span>
+            </div>
+
+            {/* Agent cards grid */}
+            <div className="p-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+              {assignedAgents
+                .filter(a => !agentSearch ||
+                  (a.username || '').toLowerCase().includes(agentSearch.toLowerCase()) ||
+                  (a.machine_id || '').toLowerCase().includes(agentSearch.toLowerCase())
+                )
+                .map((agent: any) => {
                   const online = new Date().getTime() - new Date(agent.last_seen).getTime() < 120000;
-                  const heavy = agent.current_bandwidth > 10 * 1024 * 1024;
+                  const heavy  = agent.current_bandwidth > 10 * 1024 * 1024;
                   return (
-                    <tr key={agent.machine_id} className="hover:bg-[var(--bg-card-alt)] transition-colors">
-                      <td className={TD}>
+                    <div
+                      key={agent.machine_id}
+                      className="group relative bg-[var(--bg-card-alt)] border border-[var(--border-ui)] rounded-xl p-4 transition-all duration-200 hover:border-[#6a29e1]/40 hover:shadow-lg hover:shadow-black/20 overflow-hidden"
+                    >
+                      {/* Online indicator strip */}
+                      <div className={`absolute top-0 left-0 right-0 h-[2px] transition-all ${online ? 'bg-emerald-500' : 'bg-slate-700'}`} />
+
+                      {/* Header row */}
+                      <div className="flex items-start justify-between gap-2 mb-2.5">
+                        <div className="min-w-0 flex-1">
+                          <div className="text-xs font-semibold text-[#c4b5fd] truncate leading-tight">{agent.username || '—'}</div>
+                          <div className="font-mono text-[10px] text-[var(--text-muted)] mt-0.5">{agent.machine_id || '—'}</div>
+                        </div>
                         <StatusPill tone={online ? 'success' : 'neutral'} label={online ? 'Online' : 'Offline'} pulse={online} />
-                      </td>
-                      <td className={TD}>
-                        <span className="font-mono text-sm text-[#c4b5fd]">{agent.username || '—'}</span>
-                      </td>
-                      <td className={TD}>
-                        <span className="font-mono text-xs text-[var(--text-muted)]">{agent.machine_id}</span>
-                      </td>
-                      <td className={TD}>
-                        <span className="font-mono text-xs text-[var(--text-muted)]">{agent.ip_address?.replace('::ffff:', '') || '—'}</span>
-                      </td>
-                      <td className={TD}>
-                        <span className={`tabular-nums font-medium text-sm ${heavy ? 'text-amber-300' : 'text-[var(--text-main)]'}`}>
-                          {formatBytes(agent.current_bandwidth)}/min
-                        </span>
-                      </td>
-                      <td className={`${TD} text-[var(--text-muted)] font-mono text-xs`}>
-                        {format(new Date(agent.last_seen), 'MMM dd, HH:mm:ss')}
-                      </td>
-                    </tr>
+                      </div>
+
+                      {/* Stats row */}
+                      <div className="grid grid-cols-2 gap-2 mb-3">
+                        <div className="bg-[var(--bg-card)] rounded-lg px-3 py-2 text-center">
+                          <div className={`text-base font-bold tabular-nums ${heavy ? 'text-amber-300' : 'text-[var(--text-main)]'}`}>
+                            {formatBytes(agent.current_bandwidth)}<span className="text-[9px] text-[var(--text-muted)] ml-0.5">/min</span>
+                          </div>
+                          <div className="text-[9px] text-[var(--text-muted)] uppercase tracking-widest font-semibold mt-0.5">Bandwidth</div>
+                        </div>
+                        <div className="bg-[var(--bg-card)] rounded-lg px-3 py-2 text-center">
+                          <div className="text-base font-bold tabular-nums text-[var(--text-main)]">
+                            {agent.ip_address?.replace('::ffff:', '') || '—'}
+                          </div>
+                          <div className="text-[9px] text-[var(--text-muted)] uppercase tracking-widest font-semibold mt-0.5">IP Address</div>
+                        </div>
+                      </div>
+
+                      {/* Last seen */}
+                      <div className="flex items-center gap-1.5 text-[10px] text-[var(--text-muted)] mb-3">
+                        <Clock size={9} className="shrink-0" />
+                        <span>Last seen {format(new Date(agent.last_seen), 'MMM dd, HH:mm:ss')}</span>
+                      </div>
+
+                      {/* Inspect button */}
+                      <button
+                        onClick={() => openInspect(agent)}
+                        className="cursor-pointer w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg border border-[#6a29e1]/40 bg-[#6a29e1]/10 text-[11px] font-semibold text-[#c4b5fd] hover:bg-[#6a29e1]/20 hover:border-[#6a29e1]/70 transition-all duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-[#6a29e1]/60"
+                      >
+                        <Search size={11} />
+                        Inspect Activity
+                      </button>
+                    </div>
                   );
                 })}
-              </tbody>
-            </table>
+            </div>
           </Panel>
+        )}
+
+        {/* ── Agent Inspection Modal ── */}
+        {inspectAgent && (
+          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
+            <div className="relative w-full sm:max-w-4xl max-h-screen sm:max-h-[90vh] bg-[var(--bg-card)] sm:rounded-2xl border border-[var(--border-ui)] shadow-2xl flex flex-col overflow-hidden animate-scale-in">
+
+              {/* Modal header */}
+              <div className="shrink-0 px-5 py-4 border-b border-[var(--border-ui)] bg-[var(--bg-card-alt)]/80 flex items-center gap-3">
+                <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#6a29e1]/50 to-transparent" />
+                {/* Avatar */}
+                <div className="w-9 h-9 rounded-full bg-gradient-to-br from-[#6a29e1] to-[#3b2470] flex items-center justify-center text-white font-bold text-sm shrink-0 shadow-md">
+                  {(inspectAgent.username || '?')[0].toUpperCase()}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-bold text-[var(--text-main)] truncate">{inspectAgent.username}</span>
+                    <StatusPill
+                      tone={new Date().getTime() - new Date(inspectAgent.last_seen).getTime() < 120000 ? 'success' : 'neutral'}
+                      label={new Date().getTime() - new Date(inspectAgent.last_seen).getTime() < 120000 ? 'Online' : 'Offline'}
+                      pulse={new Date().getTime() - new Date(inspectAgent.last_seen).getTime() < 120000}
+                    />
+                  </div>
+                  <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-[var(--text-muted)] font-mono mt-0.5">
+                    {inspectAgent.machine_id && <span>{inspectAgent.machine_id}</span>}
+                    {inspectAgent.ip_address && <span>{inspectAgent.ip_address.replace('::ffff:', '')}</span>}
+                  </div>
+                </div>
+                <button
+                  onClick={() => setInspectAgent(null)}
+                  aria-label="Close"
+                  className="cursor-pointer shrink-0 p-1.5 rounded-md border border-[var(--border-ui)] bg-[var(--bg-card)] hover:bg-[var(--bg-card-alt)] transition-colors text-[var(--text-muted)] hover:text-[var(--text-main)]"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+
+              {/* Modal body — scrollable */}
+              <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-4">
+                {inspectLoading ? (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      {[0,1,2,3].map(i => (
+                        <div key={i} className="bg-[var(--bg-card-alt)] border border-[var(--border-ui)] rounded-xl p-4">
+                          <div className="skeleton h-2 w-16 rounded mb-3" />
+                          <div className="skeleton h-6 w-20 rounded mb-2" />
+                          <div className="skeleton h-2 w-24 rounded" />
+                        </div>
+                      ))}
+                    </div>
+                    <div className="skeleton h-[200px] rounded-xl" />
+                    <div className="skeleton h-[300px] rounded-xl" />
+                  </div>
+                ) : (
+                  <>
+                    {/* Stat tiles */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      {(() => {
+                        const total  = inspectDetail?.overview?.total_sessions  || 0;
+                        const viols  = inspectDetail?.overview?.total_violations || 0;
+                        const ratio  = viols / Math.max(total, 1);
+                        const bw     = inspectAgent.total_bandwidth || 0;
+                        return [
+                          { title: 'Total Sessions',  value: total.toLocaleString(),       tone: 'brand'   as Tone, icon: <Globe size={13} /> },
+                          { title: 'Violations',       value: viols.toLocaleString(),       tone: 'danger'  as Tone, icon: <AlertTriangle size={13} />, sub: `${(ratio*100).toFixed(1)}% of sessions` },
+                          { title: 'Violation Ratio',  value: `${(ratio*100).toFixed(1)}%`, tone: ratio > 0.3 ? 'danger' as Tone : ratio > 0.1 ? 'warn' as Tone : 'success' as Tone, icon: <TrendingUp size={13} /> },
+                          { title: 'Total Bandwidth',  value: formatBytes(bw),              tone: 'info'    as Tone, icon: <Gauge size={13} /> },
+                        ];
+                      })().map((tile, i) => (
+                        <div key={i} className={`relative bg-[var(--bg-card-alt)] border border-[var(--border-ui)] rounded-xl p-4 overflow-hidden`}>
+                          <div className={`absolute top-0 left-0 right-0 h-[2px] ${TONE[tile.tone].bar} opacity-70`} />
+                          <div className="flex items-start justify-between mb-2">
+                            <span className="text-[9px] text-[var(--text-muted)] font-bold uppercase tracking-widest">{tile.title}</span>
+                            <span className={`${TONE[tile.tone].text} opacity-60`}>{tile.icon}</span>
+                          </div>
+                          <div className="text-xl font-bold text-[var(--text-main)] tabular-nums">{tile.value}</div>
+                          {tile.sub && <div className="text-[10px] text-[var(--text-muted)] mt-1">{tile.sub}</div>}
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Top Domains chart + Category breakdown */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="md:col-span-2 bg-[var(--bg-card-alt)] border border-[var(--border-ui)] rounded-xl overflow-hidden">
+                        <div className="px-4 py-3 border-b border-[var(--border-ui)] flex items-center gap-2">
+                          <span className="w-[3px] h-4 rounded-full bg-[#6a29e1] shrink-0" />
+                          <span className="text-xs font-semibold text-[var(--text-main)]">Top Visited Domains</span>
+                        </div>
+                        <div className="p-4 h-[200px]">
+                          {(inspectDetail?.topDomains || []).length === 0 ? (
+                            <div className="h-full flex items-center justify-center text-xs text-[var(--text-muted)] italic">No domain data yet.</div>
+                          ) : (
+                            <ResponsiveContainer width="100%" height="100%">
+                              <BarChart data={inspectDetail.topDomains} layout="vertical" margin={{ left: 8, right: 24, top: 2, bottom: 2 }}>
+                                <XAxis type="number" stroke="#64748b" fontSize={10} tickLine={false} axisLine={false} />
+                                <YAxis type="category" dataKey="domain" stroke="#64748b" fontSize={9} tickLine={false} axisLine={false} width={100} />
+                                <Tooltip
+                                  cursor={{ fill: 'rgba(106,41,225,0.05)' }}
+                                  contentStyle={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-ui)', borderRadius: '8px', color: 'var(--text-main)', fontSize: '11px' }}
+                                  itemStyle={{ color: '#a78bfa' }}
+                                />
+                                <Bar dataKey="count" radius={[0, 3, 3, 0]}>
+                                  {(inspectDetail.topDomains as any[]).map((d: any, i: number) => (
+                                    <Cell key={i} fill={d.is_violation ? '#ef4444' : i === 0 ? '#6a29e1' : '#3b2470'} />
+                                  ))}
+                                </Bar>
+                              </BarChart>
+                            </ResponsiveContainer>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="bg-[var(--bg-card-alt)] border border-[var(--border-ui)] rounded-xl overflow-hidden">
+                        <div className="px-4 py-3 border-b border-[var(--border-ui)] flex items-center gap-2">
+                          <span className="w-[3px] h-4 rounded-full bg-rose-500 shrink-0" />
+                          <span className="text-xs font-semibold text-[var(--text-main)]">Non-Work Categories</span>
+                        </div>
+                        <div className="p-4 space-y-2.5">
+                          {(inspectDetail?.categoryBreakdown || []).length === 0 ? (
+                            <div className="py-6 text-center text-xs text-[var(--text-muted)] italic">No flagged categories.</div>
+                          ) : (
+                            (inspectDetail.categoryBreakdown as any[]).map((cat: any) => {
+                              const info = getCategory(cat.category);
+                              const t    = TONE[info.tone];
+                              const max  = (inspectDetail.categoryBreakdown as any[])[0]?.count || 1;
+                              return (
+                                <div key={cat.category}>
+                                  <div className="flex justify-between mb-1">
+                                    <span className={`text-[10px] font-bold uppercase tracking-widest ${t.text}`}>{info.label}</span>
+                                    <span className="text-[10px] font-mono text-[var(--text-main)]">{cat.count}</span>
+                                  </div>
+                                  <div className="h-1.5 rounded-full bg-[var(--bg-card)] overflow-hidden">
+                                    <div className={`h-full rounded-full ${t.bar} transition-all duration-500`} style={{ width: `${(cat.count / max) * 100}%` }} />
+                                  </div>
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Browse log */}
+                    <div className="bg-[var(--bg-card-alt)] border border-[var(--border-ui)] rounded-xl overflow-hidden">
+                      <div className="px-4 py-3 border-b border-[var(--border-ui)] flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2">
+                          <span className="w-[3px] h-4 rounded-full bg-sky-500 shrink-0" />
+                          <span className="text-xs font-semibold text-[var(--text-main)]">Browse Log</span>
+                          <span className="text-[10px] text-[var(--text-muted)]">{inspectLogFilter === 'violations' ? '· violations only' : '· all activity'}</span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => handleInspectFilterChange('all')}
+                            className={`cursor-pointer px-2 py-1 rounded text-[10px] font-semibold transition-all ${inspectLogFilter === 'all' ? 'bg-[#6a29e1]/20 text-[#c4b5fd] border border-[#6a29e1]/40' : 'text-[var(--text-muted)] hover:text-[var(--text-main)] border border-transparent'}`}
+                          >
+                            All
+                          </button>
+                          <button
+                            onClick={() => handleInspectFilterChange('violations')}
+                            className={`cursor-pointer flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold transition-all ${inspectLogFilter === 'violations' ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40' : 'text-[var(--text-muted)] hover:text-[var(--text-main)] border border-transparent'}`}
+                          >
+                            <Filter size={9} />Violations
+                          </button>
+                        </div>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse">
+                          <thead>
+                            <tr className="bg-[var(--bg-card)] border-b border-[var(--border-ui)]">
+                              <th className={TH}>Domain</th>
+                              <th className={TH}>Category</th>
+                              <th className={TH}>Machine</th>
+                              <th className={TH}>Time</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-[var(--border-ui)]">
+                            {inspectLogs.length === 0 && !inspectLogsLoading ? (
+                              <tr>
+                                <td colSpan={4} className="px-4 py-8 text-center text-xs text-[var(--text-muted)] italic">
+                                  {inspectLogFilter === 'violations' ? 'No violations recorded.' : 'No activity found.'}
+                                </td>
+                              </tr>
+                            ) : (
+                              inspectLogs.map((log: any) => (
+                                <tr key={log.id} className={`transition-colors text-sm ${log.violation ? 'hover:bg-rose-500/5 border-l-2 border-rose-500/40' : 'hover:bg-[var(--bg-card)]/40 border-l-2 border-transparent'}`}>
+                                  <td className={TD}>
+                                    <span className={`font-medium truncate max-w-[160px] block ${log.violation ? 'text-rose-300' : 'text-[var(--text-main)]'}`}>{log.domain}</span>
+                                  </td>
+                                  <td className={TD}>
+                                    {log.violation ? <CategoryTag category={log.category} /> : <span className="text-[var(--text-muted)] text-xs">—</span>}
+                                  </td>
+                                  <td className={TD}><span className="font-mono text-[10px] text-[var(--text-muted)]">{log.machine_id || '—'}</span></td>
+                                  <td className={`${TD} font-mono text-[10px] text-[var(--text-muted)] whitespace-nowrap`}>{format(new Date(log.timestamp), 'MMM dd, HH:mm:ss')}</td>
+                                </tr>
+                              ))
+                            )}
+                            {inspectLogsLoading && Array.from({ length: 4 }).map((_, i) => (
+                              <tr key={`sk-${i}`}>
+                                {[180, 80, 100, 120].map((w, j) => (
+                                  <td key={j} className="px-4 py-3"><div className={`skeleton h-2.5 rounded`} style={{ width: w }} /></td>
+                                ))}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      {inspectHasMore && !inspectLogsLoading && inspectLogs.length > 0 && (
+                        <div className="px-4 py-3 border-t border-[var(--border-ui)] flex justify-center">
+                          <button
+                            onClick={handleInspectLoadMore}
+                            className="cursor-pointer flex items-center gap-1.5 px-4 py-1.5 text-[11px] font-semibold rounded-lg border border-[var(--border-ui)] bg-[var(--bg-card)] hover:border-[#6a29e1]/50 hover:bg-[#6a29e1]/10 text-[var(--text-muted)] hover:text-[#c4b5fd] transition-all"
+                          >
+                            <ChevronDown size={11} />Load more
+                          </button>
+                        </div>
+                      )}
+                      {!inspectHasMore && inspectLogs.length > 0 && (
+                        <div className="px-4 py-2.5 border-t border-[var(--border-ui)] text-center text-[10px] text-[var(--text-muted)] italic">
+                          All {inspectLogs.length} records shown
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
         )}
 
         {/* Active violations */}

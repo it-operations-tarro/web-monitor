@@ -935,6 +935,94 @@ app.get('/api/portal/dashboard', requireAuth, async (req, res) => {
   }
 });
 
+// ─── Agent Search / Drilldown endpoints ──────────────────────────────────────
+
+// GET /api/agents — all known agents with aggregated stats
+app.get('/api/agents', async (req, res) => {
+  try {
+    const agents = await dbAll(`
+      SELECT
+        l.username,
+        m.machine_id,
+        m.last_seen,
+        m.ip_address,
+        m.current_bandwidth,
+        m.total_bandwidth,
+        COUNT(l.id)                                             AS total_sessions,
+        SUM(CASE WHEN l.violation = 1 THEN 1 ELSE 0 END)       AS total_violations
+      FROM logs l
+      LEFT JOIN machines m ON l.username = m.username
+      WHERE l.username IS NOT NULL AND l.username != ''
+      GROUP BY l.username
+      ORDER BY total_sessions DESC
+    `);
+    res.json(agents);
+  } catch (e) {
+    console.error('[AGENTS]', e);
+    res.status(500).json({ error: 'Failed to fetch agents' });
+  }
+});
+
+// GET /api/agents/:email/stats — detailed analytics for a single agent
+app.get('/api/agents/:email/stats', async (req, res) => {
+  const email = decodeURIComponent(req.params.email);
+  try {
+    const [overview, topDomains, categoryBreakdown, machine, bwHistory] = await Promise.all([
+      dbGet(`
+        SELECT
+          COUNT(*)                                              AS total_sessions,
+          SUM(CASE WHEN violation = 1 THEN 1 ELSE 0 END)       AS total_violations,
+          MIN(timestamp)                                        AS first_seen,
+          MAX(timestamp)                                        AS last_activity
+        FROM logs WHERE username = ?
+      `, [email]),
+      dbAll(`
+        SELECT domain, COUNT(*) AS count,
+               MAX(violation)   AS is_violation,
+               MAX(category)    AS category
+        FROM logs WHERE username = ?
+        GROUP BY domain ORDER BY count DESC LIMIT 10
+      `, [email]),
+      dbAll(`
+        SELECT category, COUNT(*) AS count
+        FROM logs
+        WHERE username = ? AND violation = 1
+          AND category IS NOT NULL AND category != ''
+        GROUP BY category ORDER BY count DESC
+      `, [email]),
+      dbGet('SELECT * FROM machines WHERE username = ?', [email]),
+      dbAll(`
+        SELECT * FROM bandwidth_violations
+        WHERE username = ? ORDER BY timestamp DESC LIMIT 10
+      `, [email]),
+    ]);
+    res.json({ overview, topDomains, categoryBreakdown, machine, bwHistory });
+  } catch (e) {
+    console.error('[AGENT STATS]', e);
+    res.status(500).json({ error: 'Failed to fetch agent stats' });
+  }
+});
+
+// GET /api/agents/:email/logs — paginated browsing history for a single agent
+app.get('/api/agents/:email/logs', async (req, res) => {
+  const email  = decodeURIComponent(req.params.email);
+  const limit  = Math.min(parseInt(req.query.limit)  || 50, 200);
+  const offset = parseInt(req.query.offset) || 0;
+  const filter = req.query.filter; // 'violations' | undefined
+  try {
+    let sql = 'SELECT * FROM logs WHERE username = ?';
+    const params = [email];
+    if (filter === 'violations') sql += ' AND violation = 1';
+    sql += ' ORDER BY timestamp DESC LIMIT ? OFFSET ?';
+    params.push(limit, offset);
+    const logs = await dbAll(sql, params);
+    res.json(logs);
+  } catch (e) {
+    console.error('[AGENT LOGS]', e);
+    res.status(500).json({ error: 'Failed to fetch agent logs' });
+  }
+});
+
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Collector API running on http://0.0.0.0:${PORT}`);
   console.log(`📂 Database located at: ${dbPath}`);

@@ -25,6 +25,14 @@ import {
   Eye,
   EyeOff,
   TrendingUp,
+  Search,
+  UserSearch,
+  Wifi,
+  WifiOff,
+  Filter,
+  ChevronLeft,
+  ChevronDown,
+  BarChart2,
 } from 'lucide-react';
 import {
   BarChart,
@@ -159,7 +167,8 @@ function PanelHeader({
   accent = 'brand',
   subtitle,
   right,
-}: { title: string; accent?: Tone; subtitle?: string; right?: React.ReactNode }) {
+  icon,
+}: { title: string; accent?: Tone; subtitle?: string; right?: React.ReactNode; icon?: React.ReactNode }) {
   const t = TONE[accent];
   return (
     <div className="px-5 py-3.5 border-b border-[var(--border-ui)] bg-[var(--bg-card-alt)]/50 flex items-center justify-between gap-4">
@@ -202,13 +211,14 @@ function MobileNav({
   setActiveTab,
 }: {
   activeTab: string;
-  setActiveTab: (tab: 'dashboard' | 'machines' | 'enforcement' | 'users') => void;
+  setActiveTab: (tab: 'dashboard' | 'machines' | 'enforcement' | 'users' | 'search') => void;
 }) {
-  const tabs: { id: 'dashboard' | 'machines' | 'enforcement' | 'users'; icon: React.ReactNode; label: string }[] = [
+  const tabs: { id: 'dashboard' | 'machines' | 'enforcement' | 'users' | 'search'; icon: React.ReactNode; label: string }[] = [
     { id: 'dashboard',   icon: <LayoutDashboard size={19} />, label: 'Overview' },
     { id: 'machines',    icon: <Activity size={19} />,        label: 'Fleet' },
     { id: 'enforcement', icon: <ShieldCheck size={19} />,     label: 'Enforce' },
     { id: 'users',       icon: <UserCog size={19} />,         label: 'Users' },
+    { id: 'search',      icon: <UserSearch size={19} />,      label: 'Search' },
   ];
   return (
     <nav
@@ -237,7 +247,7 @@ function MobileNav({
 
 // ─── page ─────────────────────────────────────────────────────────────────
 export default function Dashboard() {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'machines' | 'enforcement' | 'users'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'machines' | 'enforcement' | 'users' | 'search'>('dashboard');
   const [stats, setStats] = useState<any>(null);
   const [logs, setLogs] = useState<any[]>([]);
   const [machines, setMachines] = useState<any[]>([]);
@@ -327,10 +337,11 @@ export default function Dashboard() {
   const detectionRatio = stats?.totalLogs ? ((stats.totalViolations / stats.totalLogs) * 100).toFixed(1) : '0';
 
   const tabMeta = {
-    dashboard:   { label: 'Overview',    title: 'Network Activity Overview',  subtitle: 'Real-time browsing surveillance from the collector' },
-    machines:    { label: 'Fleet',       title: 'Workstation Fleet',          subtitle: 'Live agent connectivity and bandwidth' },
-    enforcement: { label: 'Enforcement', title: 'Enforcement Policy',         subtitle: 'Active blocklists, categories, and top offenders' },
-    users:       { label: 'Users',       title: 'User & Agent Management',    subtitle: 'Create portal accounts and assign agents to team leads, managers, and directors' },
+    dashboard:   { label: 'Overview',      title: 'Network Activity Overview',   subtitle: 'Real-time browsing surveillance from the collector' },
+    machines:    { label: 'Fleet',         title: 'Workstation Fleet',           subtitle: 'Live agent connectivity and bandwidth' },
+    enforcement: { label: 'Enforcement',   title: 'Enforcement Policy',          subtitle: 'Active blocklists, categories, and top offenders' },
+    users:       { label: 'Users',         title: 'User & Agent Management',     subtitle: 'Create portal accounts and assign agents to team leads, managers, and directors' },
+    search:      { label: 'Agent Search',  title: 'Agent Activity Lookup',       subtitle: 'Search any agent by email or machine ID and inspect their full browsing history' },
   }[activeTab];
 
   if (loading && !stats) {
@@ -385,10 +396,14 @@ export default function Dashboard() {
         <div className="px-3 py-4 flex-1 overflow-y-auto">
           <div className="px-2 mb-2.5 text-[9px] font-bold uppercase tracking-[0.2em] text-[var(--text-muted)]/60">Workspace</div>
           <nav className="space-y-0.5">
-            <NavItem active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} icon={<LayoutDashboard size={15} />} label="Overview" />
-            <NavItem active={activeTab === 'machines'}  onClick={() => setActiveTab('machines')}  icon={<Activity size={15} />}       label="Fleet" />
-            <NavItem active={activeTab === 'enforcement'} onClick={() => setActiveTab('enforcement')} icon={<ShieldCheck size={15} />} label="Enforcement" />
-            <NavItem active={activeTab === 'users'} onClick={() => setActiveTab('users')} icon={<UserCog size={15} />} label="Users" />
+            <NavItem active={activeTab === 'dashboard'}   onClick={() => setActiveTab('dashboard')}   icon={<LayoutDashboard size={15} />} label="Overview" />
+            <NavItem active={activeTab === 'machines'}    onClick={() => setActiveTab('machines')}    icon={<Activity size={15} />}        label="Fleet" />
+            <NavItem active={activeTab === 'enforcement'} onClick={() => setActiveTab('enforcement')} icon={<ShieldCheck size={15} />}     label="Enforcement" />
+            <NavItem active={activeTab === 'users'}       onClick={() => setActiveTab('users')}       icon={<UserCog size={15} />}         label="Users" />
+            <div className="mt-2 pt-2 border-t border-[var(--border-ui-dim)]">
+              <div className="px-2 mb-1.5 text-[9px] font-bold uppercase tracking-[0.2em] text-[var(--text-muted)]/60">Lookup</div>
+              <NavItem active={activeTab === 'search'} onClick={() => setActiveTab('search')} icon={<UserSearch size={15} />} label="Agent Search" />
+            </div>
           </nav>
         </div>
 
@@ -454,6 +469,7 @@ export default function Dashboard() {
           {activeTab === 'machines' && <MachineStatusView machines={machines} onDelete={setMachineToDelete} />}
           {activeTab === 'enforcement' && <EnforcementView data={enforcement} getBaseUrl={getBaseUrl} onRefresh={fetchData} />}
           {activeTab === 'users' && <UserManagementTab getBaseUrl={getBaseUrl} />}
+          {activeTab === 'search' && <AgentSearchTab getBaseUrl={getBaseUrl} />}
         </div>
 
         {/* delete modal */}
@@ -2057,6 +2073,463 @@ function UserManagementTab({ getBaseUrl }: { getBaseUrl: () => string }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Agent Search Tab ─────────────────────────────────────────────────────────
+function AgentSearchTab({ getBaseUrl }: { getBaseUrl: () => string }) {
+  const [query, setQuery]               = useState('');
+  const [agents, setAgents]             = useState<any[]>([]);
+  const [agentsLoading, setAgentsLoading] = useState(true);
+  const [selected, setSelected]         = useState<any | null>(null);
+  const [detail, setDetail]             = useState<any | null>(null);
+  const [logs, setLogs]                 = useState<any[]>([]);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [logFilter, setLogFilter]       = useState<'all' | 'violations'>('all');
+  const [logPage, setLogPage]           = useState(0);
+  const [hasMore, setHasMore]           = useState(true);
+  const [logsLoading, setLogsLoading]   = useState(false);
+  const LOG_PAGE_SIZE = 50;
+
+  /* ── Load all agents on mount ── */
+  useEffect(() => {
+    (async () => {
+      setAgentsLoading(true);
+      try {
+        const res = await fetch(`${getBaseUrl()}/api/agents`, { cache: 'no-store' });
+        if (res.ok) setAgents(await res.json());
+      } catch {}
+      setAgentsLoading(false);
+    })();
+  }, []);
+
+  /* ── Fetch detail when an agent is selected ── */
+  const selectAgent = async (agent: any) => {
+    setSelected(agent);
+    setDetail(null);
+    setLogs([]);
+    setLogPage(0);
+    setHasMore(true);
+    setDetailLoading(true);
+    setLogFilter('all');
+    try {
+      const email = encodeURIComponent(agent.username);
+      const [statsRes, logsRes] = await Promise.all([
+        fetch(`${getBaseUrl()}/api/agents/${email}/stats`,          { cache: 'no-store' }),
+        fetch(`${getBaseUrl()}/api/agents/${email}/logs?limit=${LOG_PAGE_SIZE}&offset=0`, { cache: 'no-store' }),
+      ]);
+      if (statsRes.ok) setDetail(await statsRes.json());
+      if (logsRes.ok) {
+        const rows = await logsRes.json();
+        setLogs(rows);
+        setHasMore(rows.length === LOG_PAGE_SIZE);
+      }
+    } catch {}
+    setDetailLoading(false);
+  };
+
+  /* ── Load more logs / re-fetch with filter ── */
+  const fetchLogs = async (filter: 'all' | 'violations', page: number, replace = false) => {
+    if (!selected) return;
+    setLogsLoading(true);
+    try {
+      const email = encodeURIComponent(selected.username);
+      const params = new URLSearchParams({
+        limit:  String(LOG_PAGE_SIZE),
+        offset: String(page * LOG_PAGE_SIZE),
+        ...(filter === 'violations' ? { filter: 'violations' } : {}),
+      });
+      const res = await fetch(`${getBaseUrl()}/api/agents/${email}/logs?${params}`, { cache: 'no-store' });
+      if (res.ok) {
+        const rows = await res.json();
+        setLogs(prev => replace ? rows : [...prev, ...rows]);
+        setHasMore(rows.length === LOG_PAGE_SIZE);
+      }
+    } catch {}
+    setLogsLoading(false);
+  };
+
+  const handleFilterChange = (f: 'all' | 'violations') => {
+    setLogFilter(f);
+    setLogPage(0);
+    fetchLogs(f, 0, true);
+  };
+
+  const handleLoadMore = () => {
+    const next = logPage + 1;
+    setLogPage(next);
+    fetchLogs(logFilter, next, false);
+  };
+
+  /* ── Filtered agent list ── */
+  const filtered = agents.filter(a =>
+    !query.trim() ||
+    (a.username || '').toLowerCase().includes(query.toLowerCase()) ||
+    (a.machine_id || '').toLowerCase().includes(query.toLowerCase())
+  );
+
+  const isOnline = (lastSeen: string) =>
+    new Date().getTime() - new Date(lastSeen).getTime() < 120_000;
+
+  const ratio = (detail?.overview?.total_violations || 0) /
+    Math.max(detail?.overview?.total_sessions || 1, 1);
+
+  return (
+    <div className="flex flex-col xl:flex-row gap-4 animate-fade-in-up">
+
+      {/* ── Left: Agent Roster ─────────────────────────────────────── */}
+      <div className="xl:w-80 shrink-0 flex flex-col gap-3">
+
+        {/* Search input */}
+        <div className="relative">
+          <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] pointer-events-none" />
+          <input
+            type="text"
+            placeholder="Search by email or machine ID…"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            className="w-full bg-[var(--bg-card)] border border-[var(--border-ui)] rounded-xl pl-9 pr-4 py-2.5 text-sm text-[var(--text-main)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[#6a29e1]/60 focus:ring-1 focus:ring-[#6a29e1]/30 transition-all duration-150"
+          />
+          {query && (
+            <button
+              onClick={() => setQuery('')}
+              className="cursor-pointer absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors"
+              aria-label="Clear search"
+            >
+              <X size={13} />
+            </button>
+          )}
+        </div>
+
+        {/* Agent count */}
+        <div className="text-[11px] text-[var(--text-muted)] px-1">
+          {agentsLoading ? 'Loading agents…' : `${filtered.length} agent${filtered.length !== 1 ? 's' : ''}${query ? ' matching' : ' total'}`}
+        </div>
+
+        {/* Agent list */}
+        <Panel className="flex-1 overflow-hidden">
+          <div className="max-h-[calc(100vh-280px)] overflow-y-auto custom-scrollbar divide-y divide-[var(--border-ui)]">
+            {agentsLoading ? (
+              Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="px-4 py-3 flex flex-col gap-1.5">
+                  <div className="skeleton h-3 w-40 rounded" />
+                  <div className="skeleton h-2 w-24 rounded" />
+                </div>
+              ))
+            ) : filtered.length === 0 ? (
+              <div className="px-4 py-10 text-center text-xs text-[var(--text-muted)] italic">
+                {query ? 'No agents match your search.' : 'No agents found.'}
+              </div>
+            ) : (
+              filtered.map((agent) => {
+                const online = agent.last_seen ? isOnline(agent.last_seen) : false;
+                const isSelected = selected?.username === agent.username;
+                const violRatio = agent.total_violations / Math.max(agent.total_sessions, 1);
+                return (
+                  <button
+                    key={agent.username}
+                    onClick={() => selectAgent(agent)}
+                    className={`cursor-pointer w-full text-left px-4 py-3 transition-all duration-150 focus:outline-none group
+                      ${isSelected
+                        ? 'bg-[#6a29e1]/10 border-l-2 border-[#6a29e1]'
+                        : 'hover:bg-[var(--bg-card-alt)] border-l-2 border-transparent'
+                      }`}
+                  >
+                    <div className="flex items-start justify-between gap-2 mb-1">
+                      <span className="text-xs font-semibold text-[#c4b5fd] truncate leading-tight">{agent.username}</span>
+                      <span className={`shrink-0 w-1.5 h-1.5 rounded-full mt-0.5 ${online ? 'bg-emerald-400' : 'bg-slate-600'}`} />
+                    </div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {agent.machine_id && (
+                        <span className="font-mono text-[10px] text-[var(--text-muted)] truncate">{agent.machine_id}</span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 mt-1.5">
+                      <span className={`text-[10px] font-semibold ${agent.total_violations > 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
+                        {agent.total_violations} violation{agent.total_violations !== 1 ? 's' : ''}
+                      </span>
+                      <span className="text-[var(--text-muted)] text-[10px]">·</span>
+                      <span className="text-[10px] text-[var(--text-muted)]">{agent.total_sessions} sessions</span>
+                      {violRatio > 0 && (
+                        <>
+                          <span className="text-[var(--text-muted)] text-[10px]">·</span>
+                          <span className="text-[10px] text-amber-400">{(violRatio * 100).toFixed(0)}%</span>
+                        </>
+                      )}
+                    </div>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </Panel>
+      </div>
+
+      {/* ── Right: Agent Detail ────────────────────────────────────── */}
+      <div className="flex-1 min-w-0 space-y-4">
+        {!selected ? (
+          /* Empty state */
+          <div className="flex flex-col items-center justify-center h-80 rounded-xl border border-dashed border-[var(--border-ui)] text-center gap-3 px-6">
+            <div className="w-12 h-12 rounded-full bg-[#6a29e1]/10 border border-[#6a29e1]/20 flex items-center justify-center">
+              <UserSearch size={22} className="text-[#a78bfa]" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-[var(--text-main)] mb-1">Select an agent</p>
+              <p className="text-xs text-[var(--text-muted)] max-w-xs leading-relaxed">
+                Choose any agent from the list on the left to inspect their full browsing history, top visited sites, and bandwidth usage.
+              </p>
+            </div>
+          </div>
+        ) : detailLoading ? (
+          /* Loading skeleton */
+          <div className="space-y-4">
+            <div className="bg-[var(--bg-card)] border border-[var(--border-ui)] rounded-xl p-5 flex gap-4 items-center">
+              <div className="skeleton w-12 h-12 rounded-full" />
+              <div className="flex-1 space-y-2">
+                <div className="skeleton h-4 w-48 rounded" />
+                <div className="skeleton h-2.5 w-32 rounded" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+              {[0,1,2,3].map(i => <SkeletonTile key={i} />)}
+            </div>
+            <div className="skeleton h-[240px] rounded-xl" />
+          </div>
+        ) : (
+          <>
+            {/* ── Profile header ── */}
+            <Panel>
+              <div className="p-5 flex flex-col sm:flex-row sm:items-center gap-4">
+                {/* Avatar */}
+                <div className="w-11 h-11 rounded-full bg-gradient-to-br from-[#6a29e1] to-[#3b2470] flex items-center justify-center shrink-0 text-white font-bold text-base shadow-lg shadow-[#6a29e1]/30">
+                  {(selected.username || '?')[0].toUpperCase()}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex flex-wrap items-center gap-2 mb-0.5">
+                    <h3 className="text-base font-bold text-[var(--text-main)] truncate">{selected.username}</h3>
+                    <StatusPill
+                      tone={selected.last_seen && isOnline(selected.last_seen) ? 'success' : 'neutral'}
+                      label={selected.last_seen && isOnline(selected.last_seen) ? 'Online' : 'Offline'}
+                      pulse={!!(selected.last_seen && isOnline(selected.last_seen))}
+                    />
+                  </div>
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-[var(--text-muted)] font-mono">
+                    {selected.machine_id && (
+                      <span className="flex items-center gap-1">
+                        <Monitor size={10} className="shrink-0" />{selected.machine_id}
+                      </span>
+                    )}
+                    {selected.ip_address && (
+                      <span className="flex items-center gap-1">
+                        <Globe size={10} className="shrink-0" />{selected.ip_address.replace('::ffff:', '')}
+                      </span>
+                    )}
+                    {detail?.overview?.first_seen && (
+                      <span className="flex items-center gap-1">
+                        <Clock size={10} className="shrink-0" />First seen {format(new Date(detail.overview.first_seen), 'MMM dd, yyyy')}
+                      </span>
+                    )}
+                    {detail?.overview?.last_activity && (
+                      <span className="flex items-center gap-1">
+                        <Activity size={10} className="shrink-0" />Last active {format(new Date(detail.overview.last_activity), 'MMM dd HH:mm')}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                {/* Bandwidth */}
+                {selected.current_bandwidth != null && (
+                  <div className="shrink-0 text-right">
+                    <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest font-bold mb-0.5">Current BW</div>
+                    <div className={`text-lg font-bold tabular-nums ${selected.current_bandwidth > 10 * 1024 * 1024 ? 'text-amber-300' : 'text-[var(--text-main)]'}`}>
+                      {formatBytes(selected.current_bandwidth)}/min
+                    </div>
+                    {selected.total_bandwidth != null && (
+                      <div className="text-[10px] text-[var(--text-muted)]">Total: {formatBytes(selected.total_bandwidth)}</div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </Panel>
+
+            {/* ── Stat tiles ── */}
+            <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+              <Tile index={0} title="Total Sessions"    value={(detail?.overview?.total_sessions || 0).toLocaleString()} tone="brand"   icon={<Globe size={13} />} />
+              <Tile index={1} title="Violations"        value={(detail?.overview?.total_violations || 0).toLocaleString()} tone="danger" icon={<AlertTriangle size={13} />}
+                sub={`${((detail?.overview?.total_violations || 0) / Math.max(detail?.overview?.total_sessions || 1, 1) * 100).toFixed(1)}% of traffic`}
+              />
+              <Tile index={2} title="Violation Ratio"  value={`${(ratio * 100).toFixed(1)}%`} tone={ratio > 0.3 ? 'danger' : ratio > 0.1 ? 'warn' : 'success'} icon={<TrendingUp size={13} />} />
+              <Tile index={3} title="Total Bandwidth"  value={formatBytes(selected.total_bandwidth || 0)} tone="info" icon={<Gauge size={13} />} />
+            </div>
+
+            {/* ── Charts row ── */}
+            <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+              {/* Top domains chart */}
+              <Panel className="xl:col-span-2">
+                <PanelHeader accent="brand" title="Top Visited Domains" subtitle="Most accessed sites — all traffic" icon={<BarChart2 size={14} className="text-[var(--text-muted)]" />} />
+                <div className="p-4 h-[240px]">
+                  {(detail?.topDomains || []).length === 0 ? (
+                    <div className="h-full flex items-center justify-center text-xs text-[var(--text-muted)] italic">No browsing data yet.</div>
+                  ) : (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={detail.topDomains} layout="vertical" margin={{ left: 8, right: 24, top: 4, bottom: 4 }}>
+                        <XAxis type="number" stroke="#64748b" fontSize={11} tickLine={false} axisLine={false} />
+                        <YAxis type="category" dataKey="domain" stroke="#64748b" fontSize={10} tickLine={false} axisLine={false} width={110} />
+                        <Tooltip
+                          cursor={{ fill: 'rgba(106,41,225,0.05)' }}
+                          contentStyle={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-ui)', borderRadius: '8px', color: 'var(--text-main)', fontSize: '12px' }}
+                          itemStyle={{ color: '#a78bfa' }}
+                        />
+                        <Bar dataKey="count" radius={[0, 3, 3, 0]}>
+                          {(detail?.topDomains || []).map((_: any, i: number) => (
+                            <Cell key={i} fill={_.is_violation ? '#ef4444' : i === 0 ? '#6a29e1' : '#3b2470'} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  )}
+                </div>
+              </Panel>
+
+              {/* Category breakdown */}
+              <Panel>
+                <PanelHeader accent="danger" title="Non-Work Categories" subtitle="Violation breakdown by type" />
+                <div className="p-4 space-y-2.5">
+                  {(detail?.categoryBreakdown || []).length === 0 ? (
+                    <div className="py-8 text-center text-xs text-[var(--text-muted)] italic">No flagged categories.</div>
+                  ) : (
+                    (detail.categoryBreakdown as any[]).map((cat: any) => {
+                      const info = getCategory(cat.category);
+                      const t = TONE[info.tone];
+                      const maxCount = detail.categoryBreakdown[0]?.count || 1;
+                      const pct = (cat.count / maxCount) * 100;
+                      return (
+                        <div key={cat.category}>
+                          <div className="flex items-center justify-between mb-1">
+                            <span className={`text-[11px] font-bold uppercase tracking-widest ${t.text}`}>{info.label}</span>
+                            <span className="text-[11px] font-mono text-[var(--text-main)] tabular-nums">{cat.count}</span>
+                          </div>
+                          <div className="h-1.5 rounded-full bg-[var(--bg-card-alt)] overflow-hidden">
+                            <div className={`h-full rounded-full ${t.bar} transition-all duration-500`} style={{ width: `${pct}%` }} />
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </Panel>
+            </div>
+
+            {/* ── Browse log ── */}
+            <Panel>
+              <PanelHeader
+                accent="info"
+                title="Browse Log"
+                subtitle={`${selected.username} · ${logFilter === 'violations' ? 'non-work sites only' : 'all activity'}`}
+                right={
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => handleFilterChange('all')}
+                      className={`cursor-pointer px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all duration-150 ${
+                        logFilter === 'all'
+                          ? 'bg-[#6a29e1]/20 text-[#c4b5fd] border border-[#6a29e1]/40'
+                          : 'text-[var(--text-muted)] hover:text-[var(--text-main)] border border-transparent'
+                      }`}
+                    >
+                      All
+                    </button>
+                    <button
+                      onClick={() => handleFilterChange('violations')}
+                      className={`cursor-pointer px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all duration-150 ${
+                        logFilter === 'violations'
+                          ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                          : 'text-[var(--text-muted)] hover:text-[var(--text-main)] border border-transparent'
+                      }`}
+                    >
+                      <span className="flex items-center gap-1"><Filter size={10} />Violations Only</span>
+                    </button>
+                  </div>
+                }
+              />
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-[var(--bg-card-alt)] border-b border-[var(--border-ui)]">
+                      <th className={TH}>Domain</th>
+                      <th className={TH}>Category</th>
+                      <th className={TH}>Machine</th>
+                      <th className={TH}>Time</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[var(--border-ui)]">
+                    {logs.length === 0 && !logsLoading ? (
+                      <tr>
+                        <td colSpan={4} className="px-4 py-10 text-center text-xs text-[var(--text-muted)] italic">
+                          {logFilter === 'violations' ? 'No violations recorded for this agent.' : 'No browsing activity found.'}
+                        </td>
+                      </tr>
+                    ) : (
+                      logs.map((log: any) => (
+                        <tr
+                          key={log.id}
+                          className={`transition-colors ${log.violation ? 'hover:bg-rose-500/5 border-l-2 border-rose-500/40' : 'hover:bg-[var(--bg-card-alt)] border-l-2 border-transparent'}`}
+                        >
+                          <td className={TD}>
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className={`font-medium text-sm truncate max-w-[180px] ${log.violation ? 'text-rose-300' : 'text-[var(--text-main)]'}`}>
+                                {log.domain}
+                              </span>
+                            </div>
+                          </td>
+                          <td className={TD}>
+                            {log.violation ? (
+                              <CategoryTag category={log.category} />
+                            ) : (
+                              <span className="text-[var(--text-muted)] text-xs">—</span>
+                            )}
+                          </td>
+                          <td className={TD}>
+                            <span className="font-mono text-[11px] text-[var(--text-muted)]">{log.machine_id || '—'}</span>
+                          </td>
+                          <td className={`${TD} text-[var(--text-muted)] font-mono text-[11px] whitespace-nowrap`}>
+                            {format(new Date(log.timestamp), 'MMM dd, HH:mm:ss')}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                    {logsLoading && (
+                      Array.from({ length: 5 }).map((_, i) => (
+                        <tr key={`skel-${i}`}>
+                          <td className="px-4 py-3"><div className="skeleton h-3 w-32 rounded" /></td>
+                          <td className="px-4 py-3"><div className="skeleton h-3 w-16 rounded" /></td>
+                          <td className="px-4 py-3"><div className="skeleton h-3 w-20 rounded" /></td>
+                          <td className="px-4 py-3"><div className="skeleton h-3 w-24 rounded" /></td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              {hasMore && !logsLoading && logs.length > 0 && (
+                <div className="px-4 py-3 border-t border-[var(--border-ui)] flex justify-center">
+                  <button
+                    onClick={handleLoadMore}
+                    className="cursor-pointer flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold rounded-lg border border-[var(--border-ui)] bg-[var(--bg-card-alt)] hover:border-[#6a29e1]/50 hover:bg-[#6a29e1]/10 text-[var(--text-muted)] hover:text-[#c4b5fd] transition-all duration-150"
+                  >
+                    <ChevronDown size={12} />
+                    Load more
+                  </button>
+                </div>
+              )}
+              {!hasMore && logs.length > 0 && (
+                <div className="px-4 py-2.5 border-t border-[var(--border-ui)] text-center text-[11px] text-[var(--text-muted)] italic">
+                  All {logs.length} records loaded
+                </div>
+              )}
+            </Panel>
+          </>
+        )}
+      </div>
     </div>
   );
 }
