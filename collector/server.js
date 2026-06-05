@@ -1028,14 +1028,21 @@ app.get('/api/agents/:email/stats', async (req, res) => {
 });
 
 // GET /api/agents/:email/logs — paginated browsing history for a single agent
+// Query params:
+//   filter  = 'violations'        → only flagged entries
+//   date    = 'YYYY-MM-DD'        → restrict to a specific calendar date (default: today)
+//   limit   = number (max 200)
+//   offset  = number
 app.get('/api/agents/:email/logs', async (req, res) => {
   const email  = decodeURIComponent(req.params.email);
   const limit  = Math.min(parseInt(req.query.limit)  || 50, 200);
   const offset = parseInt(req.query.offset) || 0;
   const filter = req.query.filter; // 'violations' | undefined
+  // Default to today's date in YYYY-MM-DD (UTC) if not supplied
+  const date   = req.query.date || new Date().toISOString().slice(0, 10);
   try {
-    let sql = 'SELECT * FROM logs WHERE username = ?';
-    const params = [email];
+    let sql = 'SELECT * FROM logs WHERE username = ? AND DATE(timestamp) = ?';
+    const params = [email, date];
     if (filter === 'violations') sql += ' AND violation = 1';
     sql += ' ORDER BY timestamp DESC LIMIT ? OFFSET ?';
     params.push(limit, offset);

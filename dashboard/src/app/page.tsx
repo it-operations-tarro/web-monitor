@@ -763,6 +763,7 @@ function MachineStatusView({
   const [currentPage, setCurrentPage]             = useState(0);
 
   /* ── Inspect state ── */
+  const todayStr = () => new Date().toISOString().slice(0, 10); // YYYY-MM-DD
   const [inspectMachine, setInspectMachine]       = useState<any | null>(null);
   const [inspectDetail, setInspectDetail]         = useState<any | null>(null);
   const [inspectLogs, setInspectLogs]             = useState<any[]>([]);
@@ -771,6 +772,7 @@ function MachineStatusView({
   const [inspectLogPage, setInspectLogPage]       = useState(0);
   const [inspectHasMore, setInspectHasMore]       = useState(true);
   const [inspectLogsLoading, setInspectLogsLoading] = useState(false);
+  const [inspectDate, setInspectDate]             = useState<string>(todayStr());
   const LOG_PAGE_SIZE = 50;
 
   /* ── Load team leads on mount ── */
@@ -796,19 +798,21 @@ function MachineStatusView({
   useEffect(() => { setCurrentPage(0); }, [fleetSearch]);
 
   const openInspect = async (machine: any) => {
+    const today = todayStr();
     setInspectMachine(machine);
     setInspectDetail(null);
     setInspectLogs([]);
     setInspectLogPage(0);
     setInspectHasMore(true);
     setInspectLogFilter('all');
+    setInspectDate(today);
     setInspectLoading(true);
     try {
       const email = encodeURIComponent(machine.username);
       const base  = getBaseUrl();
       const [statsRes, logsRes] = await Promise.all([
-        fetch(`${base}/api/agents/${email}/stats`,                                { cache: 'no-store' }),
-        fetch(`${base}/api/agents/${email}/logs?limit=${LOG_PAGE_SIZE}&offset=0`, { cache: 'no-store' }),
+        fetch(`${base}/api/agents/${email}/stats`, { cache: 'no-store' }),
+        fetch(`${base}/api/agents/${email}/logs?limit=${LOG_PAGE_SIZE}&offset=0&date=${today}`, { cache: 'no-store' }),
       ]);
       if (statsRes.ok) setInspectDetail(await statsRes.json());
       if (logsRes.ok) {
@@ -820,14 +824,15 @@ function MachineStatusView({
     setInspectLoading(false);
   };
 
-  const fetchInspectLogs = async (filter: 'all' | 'violations', page: number, replace = false) => {
+  const fetchInspectLogs = async (filter: 'all' | 'violations', page: number, date: string, replace = false) => {
     if (!inspectMachine) return;
     setInspectLogsLoading(true);
     try {
       const email  = encodeURIComponent(inspectMachine.username);
       const params = new URLSearchParams({
-        limit: String(LOG_PAGE_SIZE),
+        limit:  String(LOG_PAGE_SIZE),
         offset: String(page * LOG_PAGE_SIZE),
+        date,
         ...(filter === 'violations' ? { filter: 'violations' } : {}),
       });
       const res = await fetch(`${getBaseUrl()}/api/agents/${email}/logs?${params}`, { cache: 'no-store' });
@@ -843,13 +848,19 @@ function MachineStatusView({
   const handleFilterChange = (f: 'all' | 'violations') => {
     setInspectLogFilter(f);
     setInspectLogPage(0);
-    fetchInspectLogs(f, 0, true);
+    fetchInspectLogs(f, 0, inspectDate, true);
+  };
+
+  const handleDateChange = (d: string) => {
+    setInspectDate(d);
+    setInspectLogPage(0);
+    fetchInspectLogs(inspectLogFilter, 0, d, true);
   };
 
   const handleLoadMore = () => {
     const next = inspectLogPage + 1;
     setInspectLogPage(next);
-    fetchInspectLogs(inspectLogFilter, next, false);
+    fetchInspectLogs(inspectLogFilter, next, inspectDate, false);
   };
 
   /* ── Derived lists ── */
@@ -1228,33 +1239,53 @@ function MachineStatusView({
 
                   {/* Browse log */}
                   <div className="bg-[var(--bg-card-alt)] border border-[var(--border-ui)] rounded-xl overflow-hidden">
-                    <div className="px-4 py-3 border-b border-[var(--border-ui)] flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-2">
+                    <div className="px-4 py-3 border-b border-[var(--border-ui)] flex flex-wrap items-center gap-2">
+                      <div className="flex items-center gap-2 mr-1">
                         <span className="w-[3px] h-4 rounded-full bg-sky-500 shrink-0" />
                         <span className="text-xs font-semibold text-[var(--text-main)]">Browse Log</span>
-                        <span className="text-[10px] text-[var(--text-muted)]">{inspectLogFilter === 'violations' ? '· violations only' : '· all activity'}</span>
                       </div>
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => handleFilterChange('all')}
-                          className={`cursor-pointer px-2.5 py-1 rounded-md text-[10px] font-semibold transition-all ${
-                            inspectLogFilter === 'all'
-                              ? 'bg-[#6a29e1]/20 text-[#c4b5fd] border border-[#6a29e1]/40'
-                              : 'text-[var(--text-muted)] hover:text-[var(--text-main)] border border-transparent'
-                          }`}
-                        >
-                          All
-                        </button>
-                        <button
-                          onClick={() => handleFilterChange('violations')}
-                          className={`cursor-pointer flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-semibold transition-all ${
-                            inspectLogFilter === 'violations'
-                              ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
-                              : 'text-[var(--text-muted)] hover:text-[var(--text-main)] border border-transparent'
-                          }`}
-                        >
-                          <Filter size={9} />Violations Only
-                        </button>
+
+                      {/* Violation filter toggle */}
+                      <button
+                        onClick={() => handleFilterChange('all')}
+                        className={`cursor-pointer px-2.5 py-1 rounded-md text-[10px] font-semibold transition-all ${
+                          inspectLogFilter === 'all'
+                            ? 'bg-[#6a29e1]/20 text-[#c4b5fd] border border-[#6a29e1]/40'
+                            : 'text-[var(--text-muted)] hover:text-[var(--text-main)] border border-transparent'
+                        }`}
+                      >
+                        All
+                      </button>
+                      <button
+                        onClick={() => handleFilterChange('violations')}
+                        className={`cursor-pointer flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-semibold transition-all ${
+                          inspectLogFilter === 'violations'
+                            ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                            : 'text-[var(--text-muted)] hover:text-[var(--text-main)] border border-transparent'
+                        }`}
+                      >
+                        <Filter size={9} />Violations Only
+                      </button>
+
+                      {/* Date picker */}
+                      <div className="ml-auto flex items-center gap-1.5">
+                        <Clock size={11} className="text-[var(--text-muted)] shrink-0" />
+                        <input
+                          type="date"
+                          value={inspectDate}
+                          max={todayStr()}
+                          onChange={e => e.target.value && handleDateChange(e.target.value)}
+                          className="cursor-pointer bg-[var(--bg-page)] border border-[var(--border-ui)] rounded-md px-2 py-1 text-[11px] text-[var(--text-main)] focus:outline-none focus:border-[#6a29e1]/60 transition-colors"
+                        />
+                        {inspectDate !== todayStr() && (
+                          <button
+                            onClick={() => handleDateChange(todayStr())}
+                            className="cursor-pointer px-1.5 py-1 rounded text-[10px] font-semibold text-[#c4b5fd] hover:bg-[#6a29e1]/10 transition-colors"
+                            title="Jump to today"
+                          >
+                            Today
+                          </button>
+                        )}
                       </div>
                     </div>
                     <div className="overflow-x-auto">
@@ -1271,7 +1302,9 @@ function MachineStatusView({
                           {inspectLogs.length === 0 && !inspectLogsLoading ? (
                             <tr>
                               <td colSpan={4} className="px-4 py-10 text-center text-xs text-[var(--text-muted)] italic">
-                                {inspectLogFilter === 'violations' ? 'No violations recorded for this agent.' : 'No browsing activity found.'}
+                                {inspectLogFilter === 'violations'
+                                  ? `No violations on ${inspectDate}.`
+                                  : `No browsing activity on ${inspectDate}.`}
                               </td>
                             </tr>
                           ) : (
