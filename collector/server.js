@@ -935,6 +935,30 @@ app.get('/api/portal/dashboard', requireAuth, async (req, res) => {
   }
 });
 
+// ─── Team Lead lookup (for Fleet filter dropdown) ────────────────────────────
+
+// GET /api/team-leads — all team leads with their assigned agent emails
+app.get('/api/team-leads', async (req, res) => {
+  try {
+    const teamLeads = await dbAll(
+      `SELECT id, name, username, role FROM portal_users WHERE role = 'team_lead' ORDER BY name`
+    );
+    const result = await Promise.all(
+      teamLeads.map(async (tl) => {
+        const agents = await dbAll(
+          'SELECT agent_email FROM agent_assignments WHERE user_id = ?',
+          [tl.id]
+        );
+        return { ...tl, agents: agents.map((a) => a.agent_email) };
+      })
+    );
+    res.json(result);
+  } catch (e) {
+    console.error('[TEAM LEADS]', e);
+    res.status(500).json({ error: 'Failed to fetch team leads' });
+  }
+});
+
 // ─── Agent Search / Drilldown endpoints ──────────────────────────────────────
 
 // GET /api/agents — all known agents with aggregated stats

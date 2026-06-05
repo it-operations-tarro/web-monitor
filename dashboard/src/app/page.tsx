@@ -28,6 +28,7 @@ import {
   Search,
   Filter,
   ChevronDown,
+  ChevronLeft,
 } from 'lucide-react';
 import {
   BarChart,
@@ -738,6 +739,8 @@ function OverviewTab({
 }
 
 // ─── fleet tab ────────────────────────────────────────────────────────────
+const PAGE_SIZE = 15;
+
 function MachineStatusView({
   machines,
   onDelete,
@@ -752,6 +755,13 @@ function MachineStatusView({
   const onlineCount  = machines.filter((m) => isOnline(m.last_seen)).length;
   const offlineCount = machines.length - onlineCount;
 
+  /* ── Filter / pagination state ── */
+  const [fleetSearch, setFleetSearch]             = useState('');
+  const [teamLeads, setTeamLeads]                 = useState<any[]>([]);
+  const [selectedTL, setSelectedTL]               = useState<string>('');   // team lead id, '' = all
+  const [tlAgents, setTlAgents]                   = useState<Set<string>>(new Set());
+  const [currentPage, setCurrentPage]             = useState(0);
+
   /* ── Inspect state ── */
   const [inspectMachine, setInspectMachine]       = useState<any | null>(null);
   const [inspectDetail, setInspectDetail]         = useState<any | null>(null);
@@ -761,8 +771,29 @@ function MachineStatusView({
   const [inspectLogPage, setInspectLogPage]       = useState(0);
   const [inspectHasMore, setInspectHasMore]       = useState(true);
   const [inspectLogsLoading, setInspectLogsLoading] = useState(false);
-  const [fleetSearch, setFleetSearch]             = useState('');
   const LOG_PAGE_SIZE = 50;
+
+  /* ── Load team leads on mount ── */
+  useEffect(() => {
+    fetch(`${getBaseUrl()}/api/team-leads`, { cache: 'no-store' })
+      .then(r => r.ok ? r.json() : [])
+      .then(setTeamLeads)
+      .catch(() => {});
+  }, []);
+
+  /* ── When TL selection changes, rebuild the agent email set & reset page ── */
+  useEffect(() => {
+    if (!selectedTL) {
+      setTlAgents(new Set());
+    } else {
+      const tl = teamLeads.find(t => String(t.id) === selectedTL);
+      setTlAgents(new Set((tl?.agents ?? []) as string[]));
+    }
+    setCurrentPage(0);
+  }, [selectedTL, teamLeads]);
+
+  /* ── Reset page when search changes ── */
+  useEffect(() => { setCurrentPage(0); }, [fleetSearch]);
 
   const openInspect = async (machine: any) => {
     setInspectMachine(machine);
@@ -821,12 +852,23 @@ function MachineStatusView({
     fetchInspectLogs(inspectLogFilter, next, false);
   };
 
-  const filtered = machines.filter(m =>
-    !fleetSearch ||
-    (m.machine_id  || '').toLowerCase().includes(fleetSearch.toLowerCase()) ||
-    (m.username    || '').toLowerCase().includes(fleetSearch.toLowerCase()) ||
-    (m.ip_address  || '').toLowerCase().includes(fleetSearch.toLowerCase())
-  );
+  /* ── Derived lists ── */
+  const filtered = machines.filter(m => {
+    const matchSearch =
+      !fleetSearch ||
+      (m.machine_id || '').toLowerCase().includes(fleetSearch.toLowerCase()) ||
+      (m.username   || '').toLowerCase().includes(fleetSearch.toLowerCase()) ||
+      (m.ip_address || '').toLowerCase().includes(fleetSearch.toLowerCase());
+    const matchTL =
+      !selectedTL || tlAgents.has(m.username || '');
+    return matchSearch && matchTL;
+  });
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const safePage   = Math.min(currentPage, totalPages - 1);
+  const paginated  = filtered.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
+
+  const selectedTLName = teamLeads.find(t => String(t.id) === selectedTL)?.name ?? '';
 
   return (
     <div className="space-y-3">
@@ -848,25 +890,77 @@ function MachineStatusView({
       <Panel className="animate-fade-in-up" style={{ animationDelay: '80ms' }}>
         <PanelHeader
           title="Workstation Fleet"
-          subtitle={`${filtered.length} of ${machines.length} workstation${machines.length === 1 ? '' : 's'}`}
-          right={
-            <div className="relative">
-              <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] pointer-events-none" />
-              <input
-                type="text"
-                placeholder="Filter fleet…"
-                value={fleetSearch}
-                onChange={e => setFleetSearch(e.target.value)}
-                className="bg-[var(--bg-page)] border border-[var(--border-ui)] rounded-lg pl-7 pr-3 py-1.5 text-xs text-[var(--text-main)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[#6a29e1]/60 transition-colors w-44"
-              />
-              {fleetSearch && (
-                <button onClick={() => setFleetSearch('')} className="cursor-pointer absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-main)]">
-                  <X size={11} />
-                </button>
-              )}
-            </div>
+          subtitle={
+            selectedTL
+              ? `${filtered.length} agent${filtered.length !== 1 ? 's' : ''} under ${selectedTLName}`
+              : `${filtered.length} of ${machines.length} workstation${machines.length === 1 ? '' : 's'}`
           }
         />
+
+        {/* ── Filter bar ── */}
+        <div className="px-4 py-3 border-b border-[var(--border-ui)] flex flex-wrap items-center gap-2.5">
+
+          {/* Team Lead dropdown */}
+          <div className="relative">
+            <Users size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] pointer-events-none" />
+            <select
+              value={selectedTL}
+              onChange={e => setSelectedTL(e.target.value)}
+              className="cursor-pointer appearance-none bg-[var(--bg-page)] border border-[var(--border-ui)] rounded-lg pl-7 pr-7 py-1.5 text-xs text-[var(--text-main)] focus:outline-none focus:border-[#6a29e1]/60 transition-colors min-w-[160px]"
+            >
+              <option value="">All Team Leaders</option>
+              {teamLeads.map(tl => (
+                <option key={tl.id} value={String(tl.id)}>
+                  {tl.name} ({tl.agents?.length ?? 0})
+                </option>
+              ))}
+            </select>
+            <ChevronDown size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-muted)] pointer-events-none" />
+          </div>
+
+          {/* Text search */}
+          <div className="relative">
+            <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] pointer-events-none" />
+            <input
+              type="text"
+              placeholder="Search machine, email, IP…"
+              value={fleetSearch}
+              onChange={e => setFleetSearch(e.target.value)}
+              className="bg-[var(--bg-page)] border border-[var(--border-ui)] rounded-lg pl-7 pr-7 py-1.5 text-xs text-[var(--text-main)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[#6a29e1]/60 transition-colors w-52"
+            />
+            {fleetSearch && (
+              <button
+                onClick={() => setFleetSearch('')}
+                className="cursor-pointer absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-main)]"
+              >
+                <X size={11} />
+              </button>
+            )}
+          </div>
+
+          {/* Active filter badges */}
+          {selectedTL && (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border border-[#6a29e1]/40 bg-[#6a29e1]/10 text-[#c4b5fd]">
+              <Users size={9} />
+              {selectedTLName}
+              <button
+                onClick={() => setSelectedTL('')}
+                className="cursor-pointer ml-0.5 hover:text-white transition-colors"
+                aria-label="Clear team leader filter"
+              >
+                <X size={9} />
+              </button>
+            </span>
+          )}
+
+          {/* Result count on the right */}
+          <span className="ml-auto text-[11px] text-[var(--text-muted)] tabular-nums">
+            {filtered.length} result{filtered.length !== 1 ? 's' : ''}
+            {totalPages > 1 && ` · page ${safePage + 1} of ${totalPages}`}
+          </span>
+        </div>
+
+        {/* ── Table ── */}
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
@@ -881,9 +975,9 @@ function MachineStatusView({
               </tr>
             </thead>
             <tbody className="divide-y divide-[var(--border-ui)]">
-              {filtered.map((m) => {
-                const online  = isOnline(m.last_seen);
-                const heavy   = m.current_bandwidth > 10 * 1024 * 1024;
+              {paginated.map((m) => {
+                const online     = isOnline(m.last_seen);
+                const heavy      = m.current_bandwidth > 10 * 1024 * 1024;
                 const canInspect = !!(m.username);
                 return (
                   <tr key={m.machine_id} className="hover:bg-[var(--bg-card-alt)] transition-colors group">
@@ -931,16 +1025,72 @@ function MachineStatusView({
                   </tr>
                 );
               })}
-              {filtered.length === 0 && (
+              {paginated.length === 0 && (
                 <tr>
                   <td colSpan={7} className="px-4 py-10 text-center text-xs text-[var(--text-muted)] italic">
-                    {fleetSearch ? 'No workstations match your filter.' : 'No workstations detected yet. Ensure extensions are active.'}
+                    {fleetSearch || selectedTL
+                      ? 'No workstations match the current filters.'
+                      : 'No workstations detected yet. Ensure extensions are active.'}
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
         </div>
+
+        {/* ── Pagination footer ── */}
+        {totalPages > 1 && (
+          <div className="px-4 py-3 border-t border-[var(--border-ui)] flex items-center justify-between gap-3">
+            {/* Prev */}
+            <button
+              onClick={() => setCurrentPage(p => Math.max(0, p - 1))}
+              disabled={safePage === 0}
+              className="cursor-pointer flex items-center gap-1 px-3 py-1.5 rounded-lg border border-[var(--border-ui)] bg-[var(--bg-card-alt)] text-xs font-medium text-[var(--text-muted)] hover:text-[var(--text-main)] hover:border-[#6a29e1]/40 disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-150"
+            >
+              <ChevronLeft size={13} />
+              Previous
+            </button>
+
+            {/* Page numbers */}
+            <div className="flex items-center gap-1">
+              {Array.from({ length: totalPages }, (_, i) => {
+                const showPage =
+                  i === 0 ||
+                  i === totalPages - 1 ||
+                  Math.abs(i - safePage) <= 1;
+                const showEllipsisBefore = i === safePage - 2 && safePage > 2;
+                const showEllipsisAfter  = i === safePage + 2 && safePage < totalPages - 3;
+                if (showEllipsisBefore || showEllipsisAfter) {
+                  return <span key={i} className="px-1 text-[var(--text-muted)] text-xs">…</span>;
+                }
+                if (!showPage) return null;
+                return (
+                  <button
+                    key={i}
+                    onClick={() => setCurrentPage(i)}
+                    className={`cursor-pointer w-7 h-7 rounded-md text-xs font-semibold transition-all duration-150 ${
+                      i === safePage
+                        ? 'bg-[#6a29e1] text-white shadow-sm shadow-[#6a29e1]/40'
+                        : 'border border-[var(--border-ui)] text-[var(--text-muted)] hover:text-[var(--text-main)] hover:border-[#6a29e1]/40'
+                    }`}
+                  >
+                    {i + 1}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Next */}
+            <button
+              onClick={() => setCurrentPage(p => Math.min(totalPages - 1, p + 1))}
+              disabled={safePage === totalPages - 1}
+              className="cursor-pointer flex items-center gap-1 px-3 py-1.5 rounded-lg border border-[var(--border-ui)] bg-[var(--bg-card-alt)] text-xs font-medium text-[var(--text-muted)] hover:text-[var(--text-main)] hover:border-[#6a29e1]/40 disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-150"
+            >
+              Next
+              <ChevronRight size={13} />
+            </button>
+          </div>
+        )}
       </Panel>
 
       {/* ── Inspect Modal ── */}
