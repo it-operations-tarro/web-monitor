@@ -252,7 +252,8 @@ function PortalDashboard({ token, user, onLogout }: { token: string; user: any; 
   const [error, setError]                   = useState(false);
   const [theme, setTheme]                   = useState<'light' | 'dark'>('dark');
   /* Agent inspect state */
-  const todayStr = () => new Date().toISOString().slice(0, 10);
+  // Returns today's date in EST (UTC−5) as YYYY-MM-DD
+  const todayStr = () => new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const [inspectAgent, setInspectAgent]     = useState<any | null>(null);
   const [inspectDetail, setInspectDetail]   = useState<any | null>(null);
   const [inspectLogs, setInspectLogs]       = useState<any[]>([]);
@@ -323,7 +324,9 @@ function PortalDashboard({ token, user, onLogout }: { token: string; user: any; 
         const statsData = await statsRes.json();
         setInspectDetail(statsData);
         if (statsData?.overview?.last_activity) {
-          activeDate = new Date(statsData.overview.last_activity).toISOString().slice(0, 10);
+          // Convert last_activity UTC timestamp → EST date (UTC−5)
+          activeDate = new Date(new Date(statsData.overview.last_activity).getTime() - 5 * 60 * 60 * 1000)
+            .toISOString().slice(0, 10);
         }
       }
       setInspectDate(activeDate);

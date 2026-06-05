@@ -763,7 +763,8 @@ function MachineStatusView({
   const [currentPage, setCurrentPage]             = useState(0);
 
   /* ── Inspect state ── */
-  const todayStr = () => new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  // Returns today's date in EST (UTC−5) as YYYY-MM-DD
+  const todayStr = () => new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const [inspectMachine, setInspectMachine]       = useState<any | null>(null);
   const [inspectDetail, setInspectDetail]         = useState<any | null>(null);
   const [inspectLogs, setInspectLogs]             = useState<any[]>([]);
@@ -818,7 +819,9 @@ function MachineStatusView({
         setInspectDetail(statsData);
         // Use last activity date so the log opens with actual data, not an empty "today"
         if (statsData?.overview?.last_activity) {
-          activeDate = new Date(statsData.overview.last_activity).toISOString().slice(0, 10);
+          // Convert last_activity UTC timestamp → EST date (UTC−5)
+          activeDate = new Date(new Date(statsData.overview.last_activity).getTime() - 5 * 60 * 60 * 1000)
+            .toISOString().slice(0, 10);
         }
       }
       setInspectDate(activeDate);

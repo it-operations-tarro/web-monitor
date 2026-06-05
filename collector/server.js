@@ -1038,17 +1038,21 @@ app.get('/api/agents/:email/logs', async (req, res) => {
   const limit  = Math.min(parseInt(req.query.limit)  || 50, 200);
   const offset = parseInt(req.query.offset) || 0;
   const filter = req.query.filter; // 'violations' | undefined
-  // Default to the agent's most recent log date (not today, which may have no data)
+  // EST helper — shift UTC epoch by −5 h, then take the YYYY-MM-DD slice
+  const estToday = () => new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+  // Default to the agent's most recent log date in EST (not today, which may have no data)
   let date = req.query.date;
   if (!date) {
     const last = await dbGet(
-      'SELECT DATE(timestamp) as d FROM logs WHERE username = ? ORDER BY timestamp DESC LIMIT 1',
+      "SELECT DATE(timestamp, '-5 hours') as d FROM logs WHERE username = ? ORDER BY timestamp DESC LIMIT 1",
       [email]
     );
-    date = last?.d || new Date().toISOString().slice(0, 10);
+    date = last?.d || estToday();
   }
   try {
-    let sql = 'SELECT * FROM logs WHERE username = ? AND DATE(timestamp) = ?';
+    // Use DATE(timestamp, '-5 hours') so the day boundary is midnight EST, not UTC
+    let sql = "SELECT * FROM logs WHERE username = ? AND DATE(timestamp, '-5 hours') = ?";
     const params = [email, date];
     if (filter === 'violations') sql += ' AND violation = 1';
     sql += ' ORDER BY timestamp DESC LIMIT ? OFFSET ?';
