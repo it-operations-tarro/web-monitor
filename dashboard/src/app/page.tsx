@@ -466,7 +466,7 @@ export default function Dashboard() {
               detectionRatio={detectionRatio}
             />
           )}
-          {activeTab === 'machines' && <MachineStatusView machines={machines} onDelete={setMachineToDelete} />}
+          {activeTab === 'machines' && <MachineStatusView machines={machines} onDelete={setMachineToDelete} getBaseUrl={getBaseUrl} />}
           {activeTab === 'enforcement' && <EnforcementView data={enforcement} getBaseUrl={getBaseUrl} onRefresh={fetchData} />}
           {activeTab === 'users' && <UserManagementTab getBaseUrl={getBaseUrl} />}
           {activeTab === 'search' && <AgentSearchTab getBaseUrl={getBaseUrl} />}
@@ -750,91 +750,442 @@ function OverviewTab({
 }
 
 // ─── fleet tab ────────────────────────────────────────────────────────────
-function MachineStatusView({ machines, onDelete }: { machines: any[]; onDelete: (id: string) => void }) {
-  const isOnline = (lastSeen: string) => new Date().getTime() - new Date(lastSeen).getTime() < 120000;
+function MachineStatusView({
+  machines,
+  onDelete,
+  getBaseUrl,
+}: {
+  machines: any[];
+  onDelete: (id: string) => void;
+  getBaseUrl: () => string;
+}) {
+  const isOnline = (lastSeen: string) => new Date().getTime() - new Date(lastSeen).getTime() < 120_000;
 
-  const onlineCount = machines.filter((m) => isOnline(m.last_seen)).length;
+  const onlineCount  = machines.filter((m) => isOnline(m.last_seen)).length;
   const offlineCount = machines.length - onlineCount;
+
+  /* ── Inspect state ── */
+  const [inspectMachine, setInspectMachine]       = useState<any | null>(null);
+  const [inspectDetail, setInspectDetail]         = useState<any | null>(null);
+  const [inspectLogs, setInspectLogs]             = useState<any[]>([]);
+  const [inspectLoading, setInspectLoading]       = useState(false);
+  const [inspectLogFilter, setInspectLogFilter]   = useState<'all' | 'violations'>('all');
+  const [inspectLogPage, setInspectLogPage]       = useState(0);
+  const [inspectHasMore, setInspectHasMore]       = useState(true);
+  const [inspectLogsLoading, setInspectLogsLoading] = useState(false);
+  const [fleetSearch, setFleetSearch]             = useState('');
+  const LOG_PAGE_SIZE = 50;
+
+  const openInspect = async (machine: any) => {
+    setInspectMachine(machine);
+    setInspectDetail(null);
+    setInspectLogs([]);
+    setInspectLogPage(0);
+    setInspectHasMore(true);
+    setInspectLogFilter('all');
+    setInspectLoading(true);
+    try {
+      const email = encodeURIComponent(machine.username);
+      const base  = getBaseUrl();
+      const [statsRes, logsRes] = await Promise.all([
+        fetch(`${base}/api/agents/${email}/stats`,                                { cache: 'no-store' }),
+        fetch(`${base}/api/agents/${email}/logs?limit=${LOG_PAGE_SIZE}&offset=0`, { cache: 'no-store' }),
+      ]);
+      if (statsRes.ok) setInspectDetail(await statsRes.json());
+      if (logsRes.ok) {
+        const rows = await logsRes.json();
+        setInspectLogs(rows);
+        setInspectHasMore(rows.length === LOG_PAGE_SIZE);
+      }
+    } catch {}
+    setInspectLoading(false);
+  };
+
+  const fetchInspectLogs = async (filter: 'all' | 'violations', page: number, replace = false) => {
+    if (!inspectMachine) return;
+    setInspectLogsLoading(true);
+    try {
+      const email  = encodeURIComponent(inspectMachine.username);
+      const params = new URLSearchParams({
+        limit: String(LOG_PAGE_SIZE),
+        offset: String(page * LOG_PAGE_SIZE),
+        ...(filter === 'violations' ? { filter: 'violations' } : {}),
+      });
+      const res = await fetch(`${getBaseUrl()}/api/agents/${email}/logs?${params}`, { cache: 'no-store' });
+      if (res.ok) {
+        const rows = await res.json();
+        setInspectLogs(prev => replace ? rows : [...prev, ...rows]);
+        setInspectHasMore(rows.length === LOG_PAGE_SIZE);
+      }
+    } catch {}
+    setInspectLogsLoading(false);
+  };
+
+  const handleFilterChange = (f: 'all' | 'violations') => {
+    setInspectLogFilter(f);
+    setInspectLogPage(0);
+    fetchInspectLogs(f, 0, true);
+  };
+
+  const handleLoadMore = () => {
+    const next = inspectLogPage + 1;
+    setInspectLogPage(next);
+    fetchInspectLogs(inspectLogFilter, next, false);
+  };
+
+  const filtered = machines.filter(m =>
+    !fleetSearch ||
+    (m.machine_id  || '').toLowerCase().includes(fleetSearch.toLowerCase()) ||
+    (m.username    || '').toLowerCase().includes(fleetSearch.toLowerCase()) ||
+    (m.ip_address  || '').toLowerCase().includes(fleetSearch.toLowerCase())
+  );
 
   return (
     <div className="space-y-3">
+      {/* ── KPI tiles ── */}
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
         <Tile index={0} title="Total Workstations" value={machines.length} tone="brand" icon={<Monitor size={13} />} />
-        <Tile index={1} title="Online" value={onlineCount} tone="success" sub="Heartbeat within 2 min" />
+        <Tile index={1} title="Online"  value={onlineCount}  tone="success" sub="Heartbeat within 2 min" />
         <Tile index={2} title="Offline" value={offlineCount} tone="neutral" />
         <Tile
           index={3}
           title="Avg Bandwidth"
-          value={machines.length ? formatBytes(machines.reduce((sum, m) => sum + (m.current_bandwidth || 0), 0) / machines.length) + '/min' : '0 B/min'}
+          value={machines.length ? formatBytes(machines.reduce((s, m) => s + (m.current_bandwidth || 0), 0) / machines.length) + '/min' : '0 B/min'}
           tone="info"
           icon={<Gauge size={13} />}
         />
       </div>
 
+      {/* ── Fleet table ── */}
       <Panel className="animate-fade-in-up" style={{ animationDelay: '80ms' }}>
-        <PanelHeader title="Workstation Fleet" subtitle={`${machines.length} registered agent${machines.length === 1 ? '' : 's'}`} />
+        <PanelHeader
+          title="Workstation Fleet"
+          subtitle={`${filtered.length} of ${machines.length} workstation${machines.length === 1 ? '' : 's'}`}
+          right={
+            <div className="relative">
+              <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] pointer-events-none" />
+              <input
+                type="text"
+                placeholder="Filter fleet…"
+                value={fleetSearch}
+                onChange={e => setFleetSearch(e.target.value)}
+                className="bg-[var(--bg-page)] border border-[var(--border-ui)] rounded-lg pl-7 pr-3 py-1.5 text-xs text-[var(--text-main)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[#6a29e1]/60 transition-colors w-44"
+              />
+              {fleetSearch && (
+                <button onClick={() => setFleetSearch('')} className="cursor-pointer absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-main)]">
+                  <X size={11} />
+                </button>
+              )}
+            </div>
+          }
+        />
         <div className="overflow-x-auto">
-        <table className="w-full text-left border-collapse">
-          <thead>
-            <tr className="bg-[var(--bg-card-alt)] border-b border-[var(--border-ui)]">
-              <th className={TH}>Status</th>
-              <th className={TH}>Machine</th>
-              <th className={TH}>Agent</th>
-              <th className={TH}>IP</th>
-              <th className={TH}>Bandwidth</th>
-              <th className={TH}>Last Activity</th>
-              <th className={`${TH} text-right`}>Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-[var(--border-ui)]">
-            {machines.map((m) => {
-              const online = isOnline(m.last_seen);
-              const heavy = m.current_bandwidth > 10 * 1024 * 1024;
-              return (
-                <tr key={m.machine_id} className="hover:bg-[var(--bg-card-alt)] transition-colors group">
-                  <td className={TD}>
-                    <StatusPill tone={online ? 'success' : 'neutral'} label={online ? 'Online' : 'Offline'} pulse={online} />
-                  </td>
-                  <td className={TD}>
-                    <span className="font-mono text-[var(--text-main)] text-xs">{m.machine_id}</span>
-                  </td>
-                  <td className={TD}>
-                    <span className="text-[#c4b5fd] font-mono text-xs">{m.username || 'unknown'}</span>
-                  </td>
-                  <td className={TD}>
-                    <span className="text-[var(--text-muted)] font-mono text-xs">{m.ip_address?.replace('::ffff:', '') || 'N/A'}</span>
-                  </td>
-                  <td className={TD}>
-                    <span className={`tabular-nums font-medium text-sm ${heavy ? 'text-amber-300' : 'text-[var(--text-main)]'}`}>
-                      {formatBytes(m.current_bandwidth)}/min
-                    </span>
-                  </td>
-                  <td className={`${TD} text-[var(--text-muted)] font-mono text-xs`}>
-                    {format(new Date(m.last_seen), 'MMM dd, HH:mm:ss')}
-                  </td>
-                  <td className={`${TD} text-right`}>
-                    <button
-                      onClick={() => onDelete(m.machine_id)}
-                      aria-label={`Remove workstation ${m.machine_id}`}
-                      className="p-1.5 text-[var(--text-muted)] hover:text-rose-300 hover:bg-rose-500/10 rounded-md transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 cursor-pointer"
-                    >
-                      <Trash2 size={14} />
-                    </button>
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-[var(--bg-card-alt)] border-b border-[var(--border-ui)]">
+                <th className={TH}>Status</th>
+                <th className={TH}>Machine</th>
+                <th className={TH}>Agent</th>
+                <th className={TH}>IP</th>
+                <th className={TH}>Bandwidth</th>
+                <th className={TH}>Last Activity</th>
+                <th className={`${TH} text-right`}>Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[var(--border-ui)]">
+              {filtered.map((m) => {
+                const online  = isOnline(m.last_seen);
+                const heavy   = m.current_bandwidth > 10 * 1024 * 1024;
+                const canInspect = !!(m.username);
+                return (
+                  <tr key={m.machine_id} className="hover:bg-[var(--bg-card-alt)] transition-colors group">
+                    <td className={TD}>
+                      <StatusPill tone={online ? 'success' : 'neutral'} label={online ? 'Online' : 'Offline'} pulse={online} />
+                    </td>
+                    <td className={TD}>
+                      <span className="font-mono text-[var(--text-main)] text-xs">{m.machine_id}</span>
+                    </td>
+                    <td className={TD}>
+                      <span className="text-[#c4b5fd] font-mono text-xs">{m.username || 'unknown'}</span>
+                    </td>
+                    <td className={TD}>
+                      <span className="text-[var(--text-muted)] font-mono text-xs">{m.ip_address?.replace('::ffff:', '') || 'N/A'}</span>
+                    </td>
+                    <td className={TD}>
+                      <span className={`tabular-nums font-medium text-sm ${heavy ? 'text-amber-300' : 'text-[var(--text-main)]'}`}>
+                        {formatBytes(m.current_bandwidth)}/min
+                      </span>
+                    </td>
+                    <td className={`${TD} text-[var(--text-muted)] font-mono text-xs`}>
+                      {format(new Date(m.last_seen), 'MMM dd, HH:mm:ss')}
+                    </td>
+                    <td className={`${TD} text-right`}>
+                      <div className="flex items-center justify-end gap-1.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                        {canInspect && (
+                          <button
+                            onClick={() => openInspect(m)}
+                            aria-label={`Inspect agent ${m.username}`}
+                            className="cursor-pointer flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold border border-[#6a29e1]/40 bg-[#6a29e1]/10 text-[#c4b5fd] hover:bg-[#6a29e1]/25 hover:border-[#6a29e1]/70 transition-all duration-150"
+                          >
+                            <Search size={11} />
+                            Inspect
+                          </button>
+                        )}
+                        <button
+                          onClick={() => onDelete(m.machine_id)}
+                          aria-label={`Remove workstation ${m.machine_id}`}
+                          className="cursor-pointer p-1.5 text-[var(--text-muted)] hover:text-rose-300 hover:bg-rose-500/10 rounded-md transition-colors"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+              {filtered.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="px-4 py-10 text-center text-xs text-[var(--text-muted)] italic">
+                    {fleetSearch ? 'No workstations match your filter.' : 'No workstations detected yet. Ensure extensions are active.'}
                   </td>
                 </tr>
-              );
-            })}
-            {machines.length === 0 && (
-              <tr>
-                <td colSpan={7} className="px-4 py-10 text-center text-xs text-[var(--text-muted)] italic">
-                  No workstations detected yet. Ensure extensions are active.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+              )}
+            </tbody>
+          </table>
         </div>
       </Panel>
+
+      {/* ── Inspect Modal ── */}
+      {inspectMachine && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
+          <div className="relative w-full sm:max-w-4xl max-h-screen sm:max-h-[90vh] bg-[var(--bg-card)] sm:rounded-2xl border border-[var(--border-ui)] shadow-2xl flex flex-col overflow-hidden animate-scale-in">
+
+            {/* Modal header */}
+            <div className="shrink-0 px-5 py-4 border-b border-[var(--border-ui)] bg-[var(--bg-card-alt)]/80 flex items-center gap-3">
+              <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#6a29e1]/50 to-transparent" />
+              <div className="w-9 h-9 rounded-full bg-gradient-to-br from-[#6a29e1] to-[#3b2470] flex items-center justify-center text-white font-bold text-sm shrink-0 shadow-md">
+                {(inspectMachine.username || inspectMachine.machine_id || '?')[0].toUpperCase()}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex flex-wrap items-center gap-2 mb-0.5">
+                  <span className="text-sm font-bold text-[var(--text-main)] truncate">{inspectMachine.username || inspectMachine.machine_id}</span>
+                  <StatusPill
+                    tone={isOnline(inspectMachine.last_seen) ? 'success' : 'neutral'}
+                    label={isOnline(inspectMachine.last_seen) ? 'Online' : 'Offline'}
+                    pulse={isOnline(inspectMachine.last_seen)}
+                  />
+                </div>
+                <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-[var(--text-muted)] font-mono">
+                  <span>{inspectMachine.machine_id}</span>
+                  {inspectMachine.ip_address && <span>{inspectMachine.ip_address.replace('::ffff:', '')}</span>}
+                </div>
+              </div>
+              <button
+                onClick={() => setInspectMachine(null)}
+                aria-label="Close inspect panel"
+                className="cursor-pointer shrink-0 p-1.5 rounded-md border border-[var(--border-ui)] bg-[var(--bg-card)] hover:bg-[var(--bg-card-alt)] transition-colors text-[var(--text-muted)] hover:text-[var(--text-main)]"
+              >
+                <X size={14} />
+              </button>
+            </div>
+
+            {/* Scrollable body */}
+            <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-4">
+              {inspectLoading ? (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    {[0,1,2,3].map(i => <SkeletonTile key={i} />)}
+                  </div>
+                  <div className="skeleton h-[200px] rounded-xl" />
+                  <div className="skeleton h-[300px] rounded-xl" />
+                </div>
+              ) : (
+                <>
+                  {/* Stat tiles */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    {(() => {
+                      const total = inspectDetail?.overview?.total_sessions  || 0;
+                      const viols = inspectDetail?.overview?.total_violations || 0;
+                      const ratio = viols / Math.max(total, 1);
+                      return [
+                        { title: 'Total Sessions',  value: total.toLocaleString(),        tone: 'brand'   as Tone, icon: <Globe size={13} /> },
+                        { title: 'Violations',       value: viols.toLocaleString(),        tone: 'danger'  as Tone, icon: <AlertTriangle size={13} />, sub: `${(ratio*100).toFixed(1)}% of sessions` },
+                        { title: 'Violation Ratio',  value: `${(ratio*100).toFixed(1)}%`,  tone: (ratio > 0.3 ? 'danger' : ratio > 0.1 ? 'warn' : 'success') as Tone, icon: <TrendingUp size={13} /> },
+                        { title: 'Total Bandwidth',  value: formatBytes(inspectMachine.total_bandwidth || 0), tone: 'info' as Tone, icon: <Gauge size={13} /> },
+                      ];
+                    })().map((tile, i) => (
+                      <div key={i} className="relative bg-[var(--bg-card-alt)] border border-[var(--border-ui)] rounded-xl p-4 overflow-hidden">
+                        <div className={`absolute top-0 left-0 right-0 h-[2px] ${TONE[tile.tone].bar} opacity-70`} />
+                        <div className="flex items-start justify-between mb-2">
+                          <span className="text-[9px] text-[var(--text-muted)] font-bold uppercase tracking-widest">{tile.title}</span>
+                          <span className={`${TONE[tile.tone].text} opacity-60`}>{tile.icon}</span>
+                        </div>
+                        <div className="text-xl font-bold text-[var(--text-main)] tabular-nums">{tile.value}</div>
+                        {tile.sub && <div className="text-[10px] text-[var(--text-muted)] mt-1">{tile.sub}</div>}
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Top domains chart + category breakdown */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="md:col-span-2 bg-[var(--bg-card-alt)] border border-[var(--border-ui)] rounded-xl overflow-hidden">
+                      <div className="px-4 py-3 border-b border-[var(--border-ui)] flex items-center gap-2">
+                        <span className="w-[3px] h-4 rounded-full bg-[#6a29e1] shrink-0" />
+                        <span className="text-xs font-semibold text-[var(--text-main)]">Top Visited Domains</span>
+                        <span className="text-[10px] text-[var(--text-muted)] ml-1">— red bars are flagged sites</span>
+                      </div>
+                      <div className="p-4 h-[210px]">
+                        {(inspectDetail?.topDomains || []).length === 0 ? (
+                          <div className="h-full flex items-center justify-center text-xs text-[var(--text-muted)] italic">No domain data yet.</div>
+                        ) : (
+                          <ResponsiveContainer width="100%" height="100%">
+                            <BarChart data={inspectDetail.topDomains} layout="vertical" margin={{ left: 8, right: 24, top: 2, bottom: 2 }}>
+                              <XAxis type="number" stroke="#64748b" fontSize={10} tickLine={false} axisLine={false} />
+                              <YAxis type="category" dataKey="domain" stroke="#64748b" fontSize={9} tickLine={false} axisLine={false} width={105} />
+                              <Tooltip
+                                cursor={{ fill: 'rgba(106,41,225,0.05)' }}
+                                contentStyle={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-ui)', borderRadius: '8px', color: 'var(--text-main)', fontSize: '11px' }}
+                                itemStyle={{ color: '#a78bfa' }}
+                              />
+                              <Bar dataKey="count" radius={[0, 3, 3, 0]}>
+                                {(inspectDetail?.topDomains || []).map((d: any, i: number) => (
+                                  <Cell key={i} fill={d.is_violation ? '#ef4444' : i === 0 ? '#6a29e1' : '#3b2470'} />
+                                ))}
+                              </Bar>
+                            </BarChart>
+                          </ResponsiveContainer>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="bg-[var(--bg-card-alt)] border border-[var(--border-ui)] rounded-xl overflow-hidden">
+                      <div className="px-4 py-3 border-b border-[var(--border-ui)] flex items-center gap-2">
+                        <span className="w-[3px] h-4 rounded-full bg-rose-500 shrink-0" />
+                        <span className="text-xs font-semibold text-[var(--text-main)]">Non-Work Categories</span>
+                      </div>
+                      <div className="p-4 space-y-3">
+                        {(inspectDetail?.categoryBreakdown || []).length === 0 ? (
+                          <div className="py-8 text-center text-xs text-[var(--text-muted)] italic">No flagged categories.</div>
+                        ) : (
+                          (inspectDetail.categoryBreakdown as any[]).map((cat: any) => {
+                            const info = getCategory(cat.category);
+                            const t    = TONE[info.tone];
+                            const max  = (inspectDetail.categoryBreakdown as any[])[0]?.count || 1;
+                            return (
+                              <div key={cat.category}>
+                                <div className="flex justify-between mb-1">
+                                  <span className={`text-[10px] font-bold uppercase tracking-widest ${t.text}`}>{info.label}</span>
+                                  <span className="text-[10px] font-mono text-[var(--text-main)] tabular-nums">{cat.count}</span>
+                                </div>
+                                <div className="h-1.5 rounded-full bg-[var(--bg-card)] overflow-hidden">
+                                  <div className={`h-full rounded-full ${t.bar} transition-all duration-500`} style={{ width: `${(cat.count / max) * 100}%` }} />
+                                </div>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Browse log */}
+                  <div className="bg-[var(--bg-card-alt)] border border-[var(--border-ui)] rounded-xl overflow-hidden">
+                    <div className="px-4 py-3 border-b border-[var(--border-ui)] flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <span className="w-[3px] h-4 rounded-full bg-sky-500 shrink-0" />
+                        <span className="text-xs font-semibold text-[var(--text-main)]">Browse Log</span>
+                        <span className="text-[10px] text-[var(--text-muted)]">{inspectLogFilter === 'violations' ? '· violations only' : '· all activity'}</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => handleFilterChange('all')}
+                          className={`cursor-pointer px-2.5 py-1 rounded-md text-[10px] font-semibold transition-all ${
+                            inspectLogFilter === 'all'
+                              ? 'bg-[#6a29e1]/20 text-[#c4b5fd] border border-[#6a29e1]/40'
+                              : 'text-[var(--text-muted)] hover:text-[var(--text-main)] border border-transparent'
+                          }`}
+                        >
+                          All
+                        </button>
+                        <button
+                          onClick={() => handleFilterChange('violations')}
+                          className={`cursor-pointer flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-semibold transition-all ${
+                            inspectLogFilter === 'violations'
+                              ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                              : 'text-[var(--text-muted)] hover:text-[var(--text-main)] border border-transparent'
+                          }`}
+                        >
+                          <Filter size={9} />Violations Only
+                        </button>
+                      </div>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="bg-[var(--bg-card)] border-b border-[var(--border-ui)]">
+                            <th className={TH}>Domain</th>
+                            <th className={TH}>Category</th>
+                            <th className={TH}>Machine</th>
+                            <th className={TH}>Time</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-[var(--border-ui)]">
+                          {inspectLogs.length === 0 && !inspectLogsLoading ? (
+                            <tr>
+                              <td colSpan={4} className="px-4 py-10 text-center text-xs text-[var(--text-muted)] italic">
+                                {inspectLogFilter === 'violations' ? 'No violations recorded for this agent.' : 'No browsing activity found.'}
+                              </td>
+                            </tr>
+                          ) : (
+                            inspectLogs.map((log: any) => (
+                              <tr key={log.id} className={`transition-colors ${log.violation ? 'hover:bg-rose-500/5 border-l-2 border-rose-500/40' : 'hover:bg-[var(--bg-card)]/40 border-l-2 border-transparent'}`}>
+                                <td className={TD}>
+                                  <span className={`font-medium text-sm truncate max-w-[180px] block ${log.violation ? 'text-rose-300' : 'text-[var(--text-main)]'}`}>{log.domain}</span>
+                                </td>
+                                <td className={TD}>
+                                  {log.violation ? <CategoryTag category={log.category} /> : <span className="text-[var(--text-muted)] text-xs">—</span>}
+                                </td>
+                                <td className={TD}>
+                                  <span className="font-mono text-[11px] text-[var(--text-muted)]">{log.machine_id || '—'}</span>
+                                </td>
+                                <td className={`${TD} font-mono text-[11px] text-[var(--text-muted)] whitespace-nowrap`}>
+                                  {format(new Date(log.timestamp), 'MMM dd, HH:mm:ss')}
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                          {inspectLogsLoading && Array.from({ length: 5 }).map((_, i) => (
+                            <tr key={`sk-${i}`}>
+                              {[180, 80, 100, 130].map((w, j) => (
+                                <td key={j} className="px-4 py-3"><div className="skeleton h-2.5 rounded" style={{ width: w }} /></td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    {inspectHasMore && !inspectLogsLoading && inspectLogs.length > 0 && (
+                      <div className="px-4 py-3 border-t border-[var(--border-ui)] flex justify-center">
+                        <button
+                          onClick={handleLoadMore}
+                          className="cursor-pointer flex items-center gap-1.5 px-4 py-1.5 text-[11px] font-semibold rounded-lg border border-[var(--border-ui)] bg-[var(--bg-card)] hover:border-[#6a29e1]/50 hover:bg-[#6a29e1]/10 text-[var(--text-muted)] hover:text-[#c4b5fd] transition-all duration-150"
+                        >
+                          <ChevronDown size={12} />Load more
+                        </button>
+                      </div>
+                    )}
+                    {!inspectHasMore && inspectLogs.length > 0 && (
+                      <div className="px-4 py-2.5 border-t border-[var(--border-ui)] text-center text-[11px] text-[var(--text-muted)] italic">
+                        All {inspectLogs.length} records shown
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
