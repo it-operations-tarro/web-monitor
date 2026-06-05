@@ -1038,8 +1038,15 @@ app.get('/api/agents/:email/logs', async (req, res) => {
   const limit  = Math.min(parseInt(req.query.limit)  || 50, 200);
   const offset = parseInt(req.query.offset) || 0;
   const filter = req.query.filter; // 'violations' | undefined
-  // Default to today's date in YYYY-MM-DD (UTC) if not supplied
-  const date   = req.query.date || new Date().toISOString().slice(0, 10);
+  // Default to the agent's most recent log date (not today, which may have no data)
+  let date = req.query.date;
+  if (!date) {
+    const last = await dbGet(
+      'SELECT DATE(timestamp) as d FROM logs WHERE username = ? ORDER BY timestamp DESC LIMIT 1',
+      [email]
+    );
+    date = last?.d || new Date().toISOString().slice(0, 10);
+  }
   try {
     let sql = 'SELECT * FROM logs WHERE username = ? AND DATE(timestamp) = ?';
     const params = [email, date];

@@ -798,23 +798,36 @@ function MachineStatusView({
   useEffect(() => { setCurrentPage(0); }, [fleetSearch]);
 
   const openInspect = async (machine: any) => {
-    const today = todayStr();
     setInspectMachine(machine);
     setInspectDetail(null);
     setInspectLogs([]);
     setInspectLogPage(0);
     setInspectHasMore(false);
     setInspectLogFilter('all');
-    setInspectDate(today);
+    setInspectDate(todayStr());
     setInspectLoading(true);
     try {
       const email = encodeURIComponent(machine.username);
       const base  = getBaseUrl();
-      const [statsRes, logsRes] = await Promise.all([
-        fetch(`${base}/api/agents/${email}/stats`, { cache: 'no-store' }),
-        fetch(`${base}/api/agents/${email}/logs?limit=${LOG_PAGE_SIZE + 1}&offset=0&date=${today}`, { cache: 'no-store' }),
-      ]);
-      if (statsRes.ok) setInspectDetail(await statsRes.json());
+
+      // Fetch stats first to get the agent's last active date
+      const statsRes = await fetch(`${base}/api/agents/${email}/stats`, { cache: 'no-store' });
+      let activeDate = todayStr();
+      if (statsRes.ok) {
+        const statsData = await statsRes.json();
+        setInspectDetail(statsData);
+        // Use last activity date so the log opens with actual data, not an empty "today"
+        if (statsData?.overview?.last_activity) {
+          activeDate = new Date(statsData.overview.last_activity).toISOString().slice(0, 10);
+        }
+      }
+      setInspectDate(activeDate);
+
+      // Now fetch logs for the resolved active date
+      const logsRes = await fetch(
+        `${base}/api/agents/${email}/logs?limit=${LOG_PAGE_SIZE + 1}&offset=0&date=${activeDate}`,
+        { cache: 'no-store' }
+      );
       if (logsRes.ok) {
         const rows: any[] = await logsRes.json();
         setInspectHasMore(rows.length > LOG_PAGE_SIZE);

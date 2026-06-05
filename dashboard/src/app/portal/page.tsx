@@ -304,23 +304,35 @@ function PortalDashboard({ token, user, onLogout }: { token: string; user: any; 
 
   /* ── Agent inspection helpers ── */
   const openInspect = async (agent: any) => {
-    const today = todayStr();
     setInspectAgent(agent);
     setInspectDetail(null);
     setInspectLogs([]);
     setInspectLogPage(0);
     setInspectHasMore(false);
     setInspectLogFilter('all');
-    setInspectDate(today);
+    setInspectDate(todayStr());
     setInspectLoading(true);
     try {
       const email = encodeURIComponent(agent.username);
       const base  = getBaseUrl();
-      const [statsRes, logsRes] = await Promise.all([
-        fetch(`${base}/api/agents/${email}/stats`, { cache: 'no-store' }),
-        fetch(`${base}/api/agents/${email}/logs?limit=${LOG_PAGE_SIZE + 1}&offset=0&date=${today}`, { cache: 'no-store' }),
-      ]);
-      if (statsRes.ok) setInspectDetail(await statsRes.json());
+
+      // Fetch stats first to resolve the agent's last active date
+      const statsRes = await fetch(`${base}/api/agents/${email}/stats`, { cache: 'no-store' });
+      let activeDate = todayStr();
+      if (statsRes.ok) {
+        const statsData = await statsRes.json();
+        setInspectDetail(statsData);
+        if (statsData?.overview?.last_activity) {
+          activeDate = new Date(statsData.overview.last_activity).toISOString().slice(0, 10);
+        }
+      }
+      setInspectDate(activeDate);
+
+      // Fetch logs for the resolved active date
+      const logsRes = await fetch(
+        `${base}/api/agents/${email}/logs?limit=${LOG_PAGE_SIZE + 1}&offset=0&date=${activeDate}`,
+        { cache: 'no-store' }
+      );
       if (logsRes.ok) {
         const rows: any[] = await logsRes.json();
         setInspectHasMore(rows.length > LOG_PAGE_SIZE);
