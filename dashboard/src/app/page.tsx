@@ -1427,7 +1427,10 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
     setDrillDomainLogs([]);
     fetch(`${getBaseUrl()}/api/logs?domain=${encodeURIComponent(drillDomain)}&filter=violations&limit=100`)
       .then(r => r.json())
-      .then(d => setDrillDomainLogs(Array.isArray(d) ? d : (d.logs ?? [])))
+      .then(d => {
+        const all = Array.isArray(d) ? d : (d.logs ?? []);
+        setDrillDomainLogs(all.filter((log: any) => log.domain === drillDomain));
+      })
       .catch(() => setDrillDomainLogs([]))
       .finally(() => setDrillDomainLoading(false));
   }, [drillDomain]);
