@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState, useCallback, Fragment } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Activity,
   AlertTriangle,
@@ -1126,8 +1127,8 @@ function MachineStatusView({
         )}
       </Panel>
 
-      {/* ── Inspect Modal ── */}
-      {inspectMachine && (
+      {/* ── Inspect Modal — rendered via portal so fixed inset-0 is always relative to the true viewport ── */}
+      {inspectMachine && createPortal(
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
           <div className="relative w-full sm:max-w-4xl h-[90dvh] sm:h-[90vh] bg-[var(--bg-card)] rounded-t-2xl sm:rounded-2xl border border-[var(--border-ui)] shadow-2xl flex flex-col animate-scale-in">
 
@@ -1384,7 +1385,8 @@ function MachineStatusView({
               )}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
