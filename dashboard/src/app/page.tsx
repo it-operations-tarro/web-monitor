@@ -41,9 +41,23 @@ import {
   Cell,
   CartesianGrid,
 } from 'recharts';
-import { format } from 'date-fns';
 
 // ─── utils ────────────────────────────────────────────────────────────────
+
+/** Format a timestamp in EST/EDT, 12-hour clock, e.g. "Jun 06, 10:32:07 PM" */
+const fmtEST = (ts: string | Date) => {
+  const d = new Date(ts);
+  const date = d.toLocaleDateString('en-US', { timeZone: 'America/New_York', month: 'short', day: '2-digit' });
+  const time = d.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true });
+  return `${date}, ${time}`;
+};
+/** Time-only EST, with seconds — e.g. "10:32:07 PM" */
+const fmtESTTime = (ts: string | Date) =>
+  new Date(ts).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true });
+/** Time-only EST, no seconds — e.g. "10:32 PM" */
+const fmtESTShort = (ts: string | Date) =>
+  new Date(ts).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit', hour12: true });
+
 const formatBytes = (bytes: number) => {
   if (!bytes) return '0 B';
   const k = 1024;
@@ -560,7 +574,7 @@ function OverviewTab({
                 <div className="flex justify-between items-center mb-2">
                   <StatusPill tone="warn" label="Heavy" pulse />
                   <span className="text-[10px] text-[var(--text-muted)] font-[var(--font-geist-mono)]">
-                    {format(new Date(m.last_seen), 'HH:mm')}
+                    {fmtESTShort(m.last_seen)}
                   </span>
                 </div>
                 <div className="text-xl font-bold text-amber-300 tabular-nums font-[var(--font-geist-mono)]">{formatBytes(m.current_bandwidth)}<span className="text-sm font-medium text-amber-400/70">/min</span></div>
@@ -589,7 +603,7 @@ function OverviewTab({
                 <div className="flex justify-between items-center mb-1.5">
                   <CategoryTag category={alert.category} />
                   <span className="text-[10px] text-[var(--text-muted)] font-[var(--font-geist-mono)]">
-                    {format(new Date(alert.timestamp), 'HH:mm')}
+                    {fmtESTShort(alert.timestamp)}
                   </span>
                 </div>
                 <div className="text-sm font-bold text-[var(--text-main)] truncate">{alert.domain}</div>
@@ -680,7 +694,7 @@ function OverviewTab({
                       </div>
                     </div>
                     <span className="text-[10px] text-[var(--text-muted)] font-mono tabular-nums shrink-0 mt-0.5">
-                      {format(new Date(log.timestamp), 'HH:mm:ss')}
+                      {fmtESTTime(log.timestamp)}
                     </span>
                   </div>
                 </div>
@@ -711,7 +725,7 @@ function OverviewTab({
             {bwViolations.map((v) => (
               <tr key={v.id} className="hover:bg-amber-500/5 transition-colors">
                 <td className={`${TD} text-[var(--text-muted)] font-mono text-xs`}>
-                  {format(new Date(v.timestamp), 'MMM dd, HH:mm:ss')}
+                  {fmtEST(v.timestamp)}
                 </td>
                 <td className={TD}>
                   <span className="font-mono text-[var(--text-main)] text-xs">{v.machine_id}</span>
@@ -1033,7 +1047,7 @@ function MachineStatusView({
                       </span>
                     </td>
                     <td className={`${TD} text-[var(--text-muted)] font-mono text-xs`}>
-                      {format(new Date(m.last_seen), 'MMM dd, HH:mm:ss')}
+                      {fmtEST(m.last_seen)}
                     </td>
                     <td className={`${TD} text-right`}>
                       <div className="flex items-center justify-end gap-1.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
@@ -1343,7 +1357,7 @@ function MachineStatusView({
                                   <span className="font-mono text-[11px] text-[var(--text-muted)]">{log.machine_id || '—'}</span>
                                 </td>
                                 <td className={`${TD} font-mono text-[11px] text-[var(--text-muted)] whitespace-nowrap`}>
-                                  {format(new Date(log.timestamp), 'MMM dd, HH:mm:ss')}
+                                  {fmtEST(log.timestamp)}
                                 </td>
                               </tr>
                             ))
@@ -1614,7 +1628,7 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
           right={
             lastSyncedAt && (
               <span className="text-[10px] text-[var(--text-muted)] flex items-center gap-1.5 font-mono">
-                <Clock size={11} /> {format(new Date(lastSyncedAt), 'MMM dd, HH:mm')}
+                <Clock size={11} /> {fmtESTShort(lastSyncedAt)}
               </span>
             )
           }
@@ -1818,7 +1832,7 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
                     <tr key={i} className="hover:bg-[var(--bg-card-alt)]/50 transition-colors">
                       <td className={TD}><span className="text-[#c4b5fd] font-mono text-xs">{log.username || log.agent || '—'}</span></td>
                       <td className={TD}><span className="font-mono text-[11px] text-[var(--text-muted)]">{log.machine_id || '—'}</span></td>
-                      <td className={`${TD} font-mono text-[11px] text-[var(--text-muted)] whitespace-nowrap`}>{log.timestamp ? format(new Date(log.timestamp), 'MMM dd, HH:mm:ss') : '—'}</td>
+                      <td className={`${TD} font-mono text-[11px] text-[var(--text-muted)] whitespace-nowrap`}>{log.timestamp ? fmtEST(log.timestamp) : '—'}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -1866,7 +1880,7 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
                     <tr key={log.id} className="hover:bg-rose-500/5 border-l-2 border-rose-500/30 transition-colors">
                       <td className={TD}><span className="text-rose-300 font-mono text-xs truncate max-w-[200px] block">{log.domain}</span></td>
                       <td className={TD}><CategoryTag category={log.category} /></td>
-                      <td className={`${TD} font-mono text-[11px] text-[var(--text-muted)] whitespace-nowrap`}>{format(new Date(log.timestamp), 'MMM dd, HH:mm:ss')}</td>
+                      <td className={`${TD} font-mono text-[11px] text-[var(--text-muted)] whitespace-nowrap`}>{fmtEST(log.timestamp)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -2091,7 +2105,7 @@ function UnassignedAgentsPanel({
                   <span className="font-mono text-xs text-[var(--text-muted)]">{agent.machine_id}</span>
                 </td>
                 <td className={`${TD} text-[var(--text-muted)] font-mono text-xs`}>
-                  {format(new Date(agent.last_seen), 'MMM dd, HH:mm')}
+                  {fmtESTShort(agent.last_seen)}
                 </td>
                 <td className={TD}>
                   <select
@@ -2579,7 +2593,7 @@ function UserManagementTab({ getBaseUrl }: { getBaseUrl: () => string }) {
                     </span>
                   </td>
                   <td className={`${TD} text-[var(--text-muted)] font-mono text-xs`}>
-                    {format(new Date(user.created_at), 'MMM dd, yyyy')}
+                    {new Date(user.created_at).toLocaleDateString('en-US', { timeZone: 'America/New_York', month: 'short', day: '2-digit', year: 'numeric' })}
                   </td>
                   <td className={`${TD} text-right`}>
                     <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
