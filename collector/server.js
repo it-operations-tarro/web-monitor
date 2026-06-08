@@ -1065,6 +1065,42 @@ app.get('/api/agents/:email/logs', async (req, res) => {
   }
 });
 
+/**
+ * All violation logs for a specific domain (no date restriction)
+ */
+app.get('/api/logs/domain/:domain', (req, res) => {
+  const domain = decodeURIComponent(req.params.domain);
+  const limit  = Math.min(parseInt(req.query.limit) || 100, 500);
+  const offset = parseInt(req.query.offset) || 0;
+  db.all(
+    'SELECT * FROM logs WHERE domain = ? AND violation = 1 ORDER BY timestamp DESC LIMIT ? OFFSET ?',
+    [domain, limit, offset],
+    (err, rows) => {
+      if (err) return res.status(500).json({ error: 'Failed to fetch domain logs' });
+      res.json(rows);
+    }
+  );
+});
+
+/**
+ * All violations for an agent across all dates (no date restriction)
+ */
+app.get('/api/agents/:email/violations', async (req, res) => {
+  const email  = decodeURIComponent(req.params.email);
+  const limit  = Math.min(parseInt(req.query.limit) || 50, 200);
+  const offset = parseInt(req.query.offset) || 0;
+  try {
+    const rows = await dbAll(
+      'SELECT * FROM logs WHERE username = ? AND violation = 1 ORDER BY timestamp DESC LIMIT ? OFFSET ?',
+      [email, limit, offset]
+    );
+    res.json(rows);
+  } catch (e) {
+    console.error('[AGENT VIOLATIONS]', e);
+    res.status(500).json({ error: 'Failed to fetch agent violations' });
+  }
+});
+
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Collector API running on http://0.0.0.0:${PORT}`);
   console.log(`📂 Database located at: ${dbPath}`);

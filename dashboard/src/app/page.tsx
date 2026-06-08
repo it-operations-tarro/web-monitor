@@ -1424,12 +1424,9 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
     if (!drillDomain) return;
     setDrillDomainLoading(true);
     setDrillDomainLogs([]);
-    fetch(`${getBaseUrl()}/api/logs?filter=violations&limit=500`)
+    fetch(`${getBaseUrl()}/api/logs/domain/${encodeURIComponent(drillDomain)}?limit=500`)
       .then(r => r.json())
-      .then(d => {
-        const all = Array.isArray(d) ? d : (d.logs ?? []);
-        setDrillDomainLogs(all.filter((log: any) => log.domain === drillDomain));
-      })
+      .then(d => setDrillDomainLogs(Array.isArray(d) ? d : []))
       .catch(() => setDrillDomainLogs([]))
       .finally(() => setDrillDomainLoading(false));
   }, [drillDomain]);
@@ -1439,7 +1436,7 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
     setDrillAgentLoading(true);
     setDrillAgentLogs([]);
     const off = drillAgentPage * DRILL_PAGE;
-    fetch(`${getBaseUrl()}/api/agents/${encodeURIComponent(drillAgent.username)}/logs?filter=violations&limit=${DRILL_PAGE + 1}&offset=${off}`)
+    fetch(`${getBaseUrl()}/api/agents/${encodeURIComponent(drillAgent.username)}/violations?limit=${DRILL_PAGE + 1}&offset=${off}`)
       .then(r => r.json())
       .then(rows => {
         const arr = Array.isArray(rows) ? rows : [];
@@ -1835,7 +1832,7 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
                 <span className="text-sm font-bold text-[var(--text-main)] truncate">{drillAgent.username}</span>
                 <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-500/15 text-rose-300 border border-rose-500/30">{drillAgent.count} violations</span>
               </div>
-              <p className="text-[10px] text-[var(--text-muted)]">Today&apos;s flagged browsing events</p>
+              <p className="text-[10px] text-[var(--text-muted)]">All flagged browsing events</p>
             </div>
             <button onClick={() => setDrillAgent(null)} className="cursor-pointer shrink-0 p-1.5 rounded-md border border-[var(--border-ui)] bg-[var(--bg-card)] hover:bg-[var(--bg-card-alt)] transition-colors text-[var(--text-muted)] hover:text-[var(--text-main)]"><X size={14} /></button>
           </div>
