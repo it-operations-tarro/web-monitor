@@ -1419,13 +1419,12 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
   const [drillAgentPage, setDrillAgentPage]         = useState(0);
   const [drillAgentHasMore, setDrillAgentHasMore]   = useState(false);
   const DRILL_PAGE = 15;
-  const drillToday = () => new Date(Date.now() - 5 * 3600_000).toISOString().slice(0, 10);
 
   useEffect(() => {
     if (!drillDomain) return;
     setDrillDomainLoading(true);
     setDrillDomainLogs([]);
-    fetch(`${getBaseUrl()}/api/logs?domain=${encodeURIComponent(drillDomain)}&filter=violations&limit=100`)
+    fetch(`${getBaseUrl()}/api/logs?filter=violations&limit=500`)
       .then(r => r.json())
       .then(d => {
         const all = Array.isArray(d) ? d : (d.logs ?? []);
@@ -1440,7 +1439,7 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
     setDrillAgentLoading(true);
     setDrillAgentLogs([]);
     const off = drillAgentPage * DRILL_PAGE;
-    fetch(`${getBaseUrl()}/api/agents/${encodeURIComponent(drillAgent.username)}/logs?filter=violations&limit=${DRILL_PAGE + 1}&offset=${off}&date=${drillToday()}`)
+    fetch(`${getBaseUrl()}/api/agents/${encodeURIComponent(drillAgent.username)}/logs?filter=violations&limit=${DRILL_PAGE + 1}&offset=${off}`)
       .then(r => r.json())
       .then(rows => {
         const arr = Array.isArray(rows) ? rows : [];
