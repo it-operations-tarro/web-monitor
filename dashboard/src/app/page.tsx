@@ -1406,6 +1406,53 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
   const [toggling, setToggling] = useState<string | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
 
+  /* ── Domain drill-down ── */
+  const [drillDomain, setDrillDomain]               = useState<string | null>(null);
+  const [drillDomainCat, setDrillDomainCat]         = useState('');
+  const [drillDomainLogs, setDrillDomainLogs]       = useState<any[]>([]);
+  const [drillDomainLoading, setDrillDomainLoading] = useState(false);
+
+  /* ── Agent violations drill-down ── */
+  const [drillAgent, setDrillAgent]                 = useState<any | null>(null);
+  const [drillAgentLogs, setDrillAgentLogs]         = useState<any[]>([]);
+  const [drillAgentLoading, setDrillAgentLoading]   = useState(false);
+  const [drillAgentPage, setDrillAgentPage]         = useState(0);
+  const [drillAgentHasMore, setDrillAgentHasMore]   = useState(false);
+  const DRILL_PAGE = 15;
+  const drillToday = () => new Date(Date.now() - 5 * 3600_000).toISOString().slice(0, 10);
+
+  useEffect(() => {
+    if (!drillDomain) return;
+    setDrillDomainLoading(true);
+    setDrillDomainLogs([]);
+    fetch(`${getBaseUrl()}/api/logs?domain=${encodeURIComponent(drillDomain)}&filter=violations&limit=100`)
+      .then(r => r.json())
+      .then(d => setDrillDomainLogs(Array.isArray(d) ? d : (d.logs ?? [])))
+      .catch(() => setDrillDomainLogs([]))
+      .finally(() => setDrillDomainLoading(false));
+  }, [drillDomain]);
+
+  useEffect(() => {
+    if (!drillAgent) return;
+    setDrillAgentLoading(true);
+    setDrillAgentLogs([]);
+    const off = drillAgentPage * DRILL_PAGE;
+    fetch(`${getBaseUrl()}/api/agents/${encodeURIComponent(drillAgent.username)}/logs?filter=violations&limit=${DRILL_PAGE + 1}&offset=${off}&date=${drillToday()}`)
+      .then(r => r.json())
+      .then(rows => {
+        const arr = Array.isArray(rows) ? rows : [];
+        setDrillAgentHasMore(arr.length > DRILL_PAGE);
+        setDrillAgentLogs(arr.slice(0, DRILL_PAGE));
+      })
+      .catch(() => setDrillAgentLogs([]))
+      .finally(() => setDrillAgentLoading(false));
+  }, [drillAgent, drillAgentPage]);
+
+  useEffect(() => {
+    document.body.style.overflow = (drillDomain || drillAgent) ? 'hidden' : '';
+    return () => { document.body.style.overflow = ''; };
+  }, [drillDomain, drillAgent]);
+
   if (!data) {
     return (
       <Panel>
@@ -1500,6 +1547,7 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
   };
 
   return (
+    <>
     <div className="space-y-3">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <Tile index={0} title="Blocked Domains"   value={totalBlockedDomains.toLocaleString()} tone="brand"   icon={<ShieldCheck size={13} />} />
@@ -1659,8 +1707,8 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
             </thead>
             <tbody className="divide-y divide-[var(--border-ui)]">
               {topOffendingDomains.map((d: any) => (
-                <tr key={d.domain} className="hover:bg-rose-500/5 transition-colors duration-150">
-                  <td className={TD}><span className="font-mono text-xs text-[var(--text-main)] truncate">{d.domain}</span></td>
+                <tr key={d.domain} onClick={() => { setDrillDomain(d.domain); setDrillDomainCat(d.category); }} className="cursor-pointer hover:bg-rose-500/10 transition-colors duration-150 group">
+                  <td className={TD}><span className="font-mono text-xs text-[var(--text-main)] group-hover:text-rose-300 transition-colors truncate">{d.domain}</span></td>
                   <td className={TD}><CategoryTag category={d.category} /></td>
                   <td className={`${TD} text-right`}><span className="text-rose-300 font-bold tabular-nums">{d.count}</span></td>
                 </tr>
@@ -1686,8 +1734,8 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
             </thead>
             <tbody className="divide-y divide-[var(--border-ui)]">
               {topOffendingUsers.map((u: any) => (
-                <tr key={u.username} className="hover:bg-[var(--bg-card-alt)] transition-colors duration-150">
-                  <td className={TD}><span className="text-[#c4b5fd] font-mono text-xs">{u.username}</span></td>
+                <tr key={u.username} onClick={() => { setDrillAgent(u); setDrillAgentPage(0); }} className="cursor-pointer hover:bg-[#6a29e1]/10 transition-colors duration-150 group">
+                  <td className={TD}><span className="text-[#c4b5fd] font-mono text-xs group-hover:text-white transition-colors">{u.username}</span></td>
                   <td className={TD}><span className="font-mono text-xs text-[var(--text-muted)]">{u.machine_id}</span></td>
                   <td className={`${TD} text-right`}><span className="text-rose-300 font-bold tabular-nums">{u.count}</span></td>
                 </tr>
@@ -1726,6 +1774,111 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
         </div>
       </Panel>
     </div>
+
+    {/* ── Domain drill-down modal ── */}
+    {drillDomain && createPortal(
+      <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
+        <div className="relative w-full sm:max-w-2xl h-[90dvh] sm:h-[80vh] bg-[var(--bg-card)] rounded-t-2xl sm:rounded-2xl border border-[var(--border-ui)] shadow-2xl flex flex-col animate-scale-in">
+          <div className="shrink-0 px-5 py-4 border-b border-[var(--border-ui)] bg-[var(--bg-card-alt)]/80 flex items-center gap-3">
+            <div className="flex-1 min-w-0">
+              <div className="flex flex-wrap items-center gap-2 mb-0.5">
+                <span className="text-sm font-bold text-[var(--text-main)] font-mono truncate">{drillDomain}</span>
+                <CategoryTag category={drillDomainCat} />
+              </div>
+              <p className="text-[10px] text-[var(--text-muted)]">Agents who accessed this blocked domain</p>
+            </div>
+            <button onClick={() => setDrillDomain(null)} className="cursor-pointer shrink-0 p-1.5 rounded-md border border-[var(--border-ui)] bg-[var(--bg-card)] hover:bg-[var(--bg-card-alt)] transition-colors text-[var(--text-muted)] hover:text-[var(--text-main)]"><X size={14} /></button>
+          </div>
+          <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
+            {drillDomainLoading ? (
+              <div className="p-6 space-y-2">{[...Array(5)].map((_, i) => <div key={i} className="skeleton h-8 rounded" />)}</div>
+            ) : (
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-[var(--bg-card-alt)] border-b border-[var(--border-ui)] sticky top-0">
+                    <th className={TH}>Agent</th>
+                    <th className={TH}>Machine</th>
+                    <th className={TH}>Time</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[var(--border-ui)]">
+                  {drillDomainLogs.length === 0 ? (
+                    <tr><td colSpan={3} className="px-4 py-10 text-center text-xs text-[var(--text-muted)] italic">No data found for this domain.</td></tr>
+                  ) : drillDomainLogs.map((log: any, i: number) => (
+                    <tr key={i} className="hover:bg-[var(--bg-card-alt)]/50 transition-colors">
+                      <td className={TD}><span className="text-[#c4b5fd] font-mono text-xs">{log.username || log.agent || '—'}</span></td>
+                      <td className={TD}><span className="font-mono text-[11px] text-[var(--text-muted)]">{log.machine_id || '—'}</span></td>
+                      <td className={`${TD} font-mono text-[11px] text-[var(--text-muted)] whitespace-nowrap`}>{log.timestamp ? format(new Date(log.timestamp), 'MMM dd, HH:mm:ss') : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      </div>,
+      document.body
+    )}
+
+    {/* ── Agent violations drill-down modal ── */}
+    {drillAgent && createPortal(
+      <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
+        <div className="relative w-full sm:max-w-2xl h-[90dvh] sm:h-[80vh] bg-[var(--bg-card)] rounded-t-2xl sm:rounded-2xl border border-[var(--border-ui)] shadow-2xl flex flex-col animate-scale-in">
+          <div className="shrink-0 px-5 py-4 border-b border-[var(--border-ui)] bg-[var(--bg-card-alt)]/80 flex items-center gap-3">
+            <div className="w-9 h-9 rounded-full bg-gradient-to-br from-rose-500 to-rose-700 flex items-center justify-center text-white font-bold text-sm shrink-0 shadow-md">
+              {(drillAgent.username || '?')[0].toUpperCase()}
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex flex-wrap items-center gap-2 mb-0.5">
+                <span className="text-sm font-bold text-[var(--text-main)] truncate">{drillAgent.username}</span>
+                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-500/15 text-rose-300 border border-rose-500/30">{drillAgent.count} violations</span>
+              </div>
+              <p className="text-[10px] text-[var(--text-muted)]">Today&apos;s flagged browsing events</p>
+            </div>
+            <button onClick={() => setDrillAgent(null)} className="cursor-pointer shrink-0 p-1.5 rounded-md border border-[var(--border-ui)] bg-[var(--bg-card)] hover:bg-[var(--bg-card-alt)] transition-colors text-[var(--text-muted)] hover:text-[var(--text-main)]"><X size={14} /></button>
+          </div>
+          <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
+            {drillAgentLoading ? (
+              <div className="p-6 space-y-2">{[...Array(5)].map((_, i) => <div key={i} className="skeleton h-8 rounded" />)}</div>
+            ) : (
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-[var(--bg-card-alt)] border-b border-[var(--border-ui)] sticky top-0">
+                    <th className={TH}>Domain</th>
+                    <th className={TH}>Category</th>
+                    <th className={`${TH} whitespace-nowrap`}>Time</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[var(--border-ui)]">
+                  {drillAgentLogs.length === 0 ? (
+                    <tr><td colSpan={3} className="px-4 py-10 text-center text-xs text-[var(--text-muted)] italic">No violations today.</td></tr>
+                  ) : drillAgentLogs.map((log: any) => (
+                    <tr key={log.id} className="hover:bg-rose-500/5 border-l-2 border-rose-500/30 transition-colors">
+                      <td className={TD}><span className="text-rose-300 font-mono text-xs truncate max-w-[200px] block">{log.domain}</span></td>
+                      <td className={TD}><CategoryTag category={log.category} /></td>
+                      <td className={`${TD} font-mono text-[11px] text-[var(--text-muted)] whitespace-nowrap`}>{format(new Date(log.timestamp), 'MMM dd, HH:mm:ss')}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+          {(drillAgentPage > 0 || drillAgentHasMore) && (
+            <div className="shrink-0 px-4 py-3 border-t border-[var(--border-ui)] flex items-center justify-between gap-3">
+              <button onClick={() => setDrillAgentPage(p => p - 1)} disabled={drillAgentPage === 0 || drillAgentLoading} className="cursor-pointer flex items-center gap-1 px-3 py-1.5 rounded-lg border border-[var(--border-ui)] bg-[var(--bg-card)] text-xs font-medium text-[var(--text-muted)] hover:text-[var(--text-main)] hover:border-[#6a29e1]/40 disabled:opacity-30 disabled:cursor-not-allowed transition-all">
+                <ChevronLeft size={13} />Previous
+              </button>
+              <span className="text-[11px] text-[var(--text-muted)] tabular-nums">Page {drillAgentPage + 1}</span>
+              <button onClick={() => setDrillAgentPage(p => p + 1)} disabled={!drillAgentHasMore || drillAgentLoading} className="cursor-pointer flex items-center gap-1 px-3 py-1.5 rounded-lg border border-[var(--border-ui)] bg-[var(--bg-card)] text-xs font-medium text-[var(--text-muted)] hover:text-[var(--text-main)] hover:border-[#6a29e1]/40 disabled:opacity-30 disabled:cursor-not-allowed transition-all">
+                Next<ChevronRight size={13} />
+              </button>
+            </div>
+          )}
+        </div>
+      </div>,
+      document.body
+    )}
+    </>
   );
 }
 
