@@ -148,6 +148,115 @@ function Tile({
   );
 }
 
+// ─── orchestrator loading screen ──────────────────────────────────────────
+const BOOT_STEPS = [
+  'Initializing network collectors…',
+  'Establishing secure agent connections…',
+  'Loading enforcement policy engine…',
+  'Syncing workstation fleet registry…',
+  'Aggregating bandwidth telemetry…',
+  'Calibrating violation detection…',
+  'Mounting surveillance pipeline…',
+  'System ready — launching dashboard…',
+];
+
+function LoadingScreen() {
+  const [step, setStep] = useState(0);
+  const [progress, setProgress] = useState(0);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setStep(s => {
+        const next = s + 1;
+        setProgress(Math.round((next / BOOT_STEPS.length) * 100));
+        return next >= BOOT_STEPS.length ? s : next;
+      });
+    }, 600);
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <div className="fixed inset-0 z-50 bg-[#07030f] flex flex-col items-center justify-center overflow-hidden select-none">
+      {/* Grid background */}
+      <div className="absolute inset-0 bg-grid opacity-20" />
+
+      {/* Ambient purple glow */}
+      <div className="absolute w-[600px] h-[600px] rounded-full bg-[#6a29e1]/8 blur-[120px] pointer-events-none" />
+
+      {/* Scan line */}
+      <div className="absolute inset-x-0 h-[1px] bg-gradient-to-r from-transparent via-[#6a29e1]/40 to-transparent animate-sweep pointer-events-none" />
+
+      {/* Corner brackets — top-left */}
+      <div className="absolute top-6 left-6 w-8 h-8 border-t-2 border-l-2 border-[#6a29e1]/50 rounded-tl-sm" />
+      <div className="absolute top-6 right-6 w-8 h-8 border-t-2 border-r-2 border-[#6a29e1]/50 rounded-tr-sm" />
+      <div className="absolute bottom-6 left-6 w-8 h-8 border-b-2 border-l-2 border-[#6a29e1]/50 rounded-bl-sm" />
+      <div className="absolute bottom-6 right-6 w-8 h-8 border-b-2 border-r-2 border-[#6a29e1]/50 rounded-br-sm" />
+
+      {/* Main content */}
+      <div className="relative flex flex-col items-center gap-8">
+
+        {/* Logo + orbit ring */}
+        <div className="relative flex items-center justify-center w-24 h-24">
+          {/* Orbit ring */}
+          <div className="absolute inset-0 rounded-full border border-[#6a29e1]/20" />
+          <div className="absolute inset-[-8px] rounded-full border border-dashed border-[#6a29e1]/15" />
+          {/* Orbiting dot */}
+          <div className="absolute inset-0 flex items-center justify-center animate-orbit">
+            <div className="w-2 h-2 rounded-full bg-[#6a29e1] shadow-[0_0_8px_#6a29e1]" />
+          </div>
+          {/* Logo */}
+          <div className="relative z-10 w-16 h-16 rounded-2xl bg-gradient-to-br from-[#6a29e1] to-[#3b2470] flex items-center justify-center shadow-2xl shadow-[#6a29e1]/40 ring-1 ring-[#6a29e1]/60">
+            <img src="/logo.jpg" alt="Tarro" className="w-14 h-14 rounded-xl object-cover" />
+          </div>
+        </div>
+
+        {/* Brand */}
+        <div className="text-center space-y-1">
+          <div className="text-2xl font-bold text-[#f1f5f9] tracking-tight">Tarro</div>
+          <div className="text-[10px] font-bold uppercase tracking-[0.35em] text-[#6a29e1]">Web Monitor</div>
+        </div>
+
+        {/* Boot message */}
+        <div className="h-4 flex items-center">
+          <span className="text-[11px] font-mono text-[#7c85a2] tracking-wide">
+            {BOOT_STEPS[step]}
+          </span>
+        </div>
+
+        {/* Progress track */}
+        <div className="w-72 space-y-2">
+          <div className="relative h-[3px] bg-[#221650] rounded-full overflow-hidden">
+            <div
+              className="absolute inset-y-0 left-0 bg-gradient-to-r from-[#6a29e1] to-[#a78bfa] rounded-full transition-all duration-500 ease-out"
+              style={{ width: `${progress}%` }}
+            />
+            {/* Shimmer */}
+            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent animate-load-bar" />
+          </div>
+          <div className="flex justify-between text-[9px] font-mono text-[#2d1b5e]">
+            <span>BOOT SEQUENCE</span>
+            <span>{progress}%</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Bottom system status row */}
+      <div className="absolute bottom-10 flex items-center gap-8">
+        {[
+          { label: 'COLLECTOR API', color: 'bg-emerald-500', delay: '0s' },
+          { label: 'POLICY ENGINE', color: 'bg-[#6a29e1]',  delay: '0.3s' },
+          { label: 'AGENT REGISTRY', color: 'bg-sky-500',   delay: '0.6s' },
+        ].map(({ label, color, delay }) => (
+          <div key={label} className="flex items-center gap-1.5">
+            <div className={`w-1.5 h-1.5 rounded-full ${color} animate-pulse`} style={{ animationDelay: delay }} />
+            <span className="text-[9px] font-mono font-bold tracking-[0.15em] text-[#2d1b5e]">{label}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function SkeletonTile() {
   return (
     <div className="bg-[var(--bg-card)] border border-[var(--border-ui)] rounded-xl p-5 relative overflow-hidden">
@@ -354,25 +463,7 @@ export default function Dashboard() {
   }[activeTab];
 
   if (loading && !stats) {
-    return (
-      <div className="min-h-screen bg-[var(--bg-page)]">
-        <aside className="fixed left-0 top-0 h-full w-60 bg-[var(--bg-sidebar)] border-r border-[var(--border-ui)] hidden lg:block" />
-        <main className="lg:ml-60 px-4 sm:px-6 lg:px-8 py-6 pb-24 lg:pb-8">
-          <div className="mb-7">
-            <div className="skeleton h-2 w-32 rounded mb-3" />
-            <div className="skeleton h-6 w-64 rounded mb-2" />
-            <div className="skeleton h-2 w-80 rounded" />
-          </div>
-          <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 mb-4">
-            {[0, 1, 2, 3].map((i) => <SkeletonTile key={i} />)}
-          </div>
-          <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
-            <div className="xl:col-span-2 skeleton h-[300px] rounded-xl" />
-            <div className="skeleton h-[300px] rounded-xl" />
-          </div>
-        </main>
-      </div>
-    );
+    return <LoadingScreen />;
   }
 
   return (

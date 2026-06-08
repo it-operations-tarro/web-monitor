@@ -80,6 +80,24 @@ body {
   0%, 100% { box-shadow: 0 0 4px currentColor; }
   50%       { box-shadow: 0 0 10px currentColor; }
 }
+@keyframes loadBar {
+  0%   { transform: translateX(-100%); }
+  60%  { transform: translateX(0%); }
+  100% { transform: translateX(0%); }
+}
+@keyframes sweepLine {
+  0%   { transform: translateY(-100%); opacity: 0; }
+  10%  { opacity: 1; }
+  90%  { opacity: 1; }
+  100% { transform: translateY(100vh); opacity: 0; }
+}
+@keyframes orbit {
+  from { transform: rotate(0deg) translateX(28px) rotate(0deg); }
+  to   { transform: rotate(360deg) translateX(28px) rotate(-360deg); }
+}
+.animate-load-bar  { animation: loadBar  2.4s cubic-bezier(0.4,0,0.2,1) infinite; }
+.animate-sweep     { animation: sweepLine 3s linear infinite; }
+.animate-orbit     { animation: orbit 2s linear infinite; }
 
 .skeleton {
   background: linear-gradient(90deg, var(--bg-card-alt) 25%, var(--bg-card) 50%, var(--bg-card-alt) 75%);
