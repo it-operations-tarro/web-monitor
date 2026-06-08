@@ -1124,10 +1124,10 @@ function MachineStatusView({
       {inspectMachine && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/80 backdrop-blur-sm animate-fade-in">
           <div className="flex min-h-full items-end sm:items-center justify-center p-0 sm:p-4">
-          <div className="relative w-full sm:max-w-4xl max-h-[90vh] bg-[var(--bg-card)] rounded-t-2xl sm:rounded-2xl border border-[var(--border-ui)] shadow-2xl flex flex-col overflow-hidden animate-scale-in">
+          <div className="relative w-full sm:max-w-4xl bg-[var(--bg-card)] rounded-t-2xl sm:rounded-2xl border border-[var(--border-ui)] shadow-2xl animate-scale-in">
 
-            {/* Modal header */}
-            <div className="shrink-0 px-5 py-4 border-b border-[var(--border-ui)] bg-[var(--bg-card-alt)]/80 flex items-center gap-3">
+            {/* Modal header — sticky so agent name stays visible while scrolling */}
+            <div className="sticky top-0 z-10 px-5 py-4 border-b border-[var(--border-ui)] bg-[var(--bg-card-alt)] flex items-center gap-3 rounded-t-2xl sm:rounded-t-2xl">
               <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#6a29e1]/50 to-transparent" />
               <div className="w-9 h-9 rounded-full bg-gradient-to-br from-[#6a29e1] to-[#3b2470] flex items-center justify-center text-white font-bold text-sm shrink-0 shadow-md">
                 {(inspectMachine.username || inspectMachine.machine_id || '?')[0].toUpperCase()}
@@ -1155,8 +1155,8 @@ function MachineStatusView({
               </button>
             </div>
 
-            {/* Scrollable body */}
-            <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-4 space-y-4">
+            {/* Body */}
+            <div className="p-4 space-y-4">
               {inspectLoading ? (
                 <div className="space-y-4">
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
