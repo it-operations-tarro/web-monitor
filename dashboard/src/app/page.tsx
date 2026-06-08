@@ -1411,6 +1411,7 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
   const [drillDomainCat, setDrillDomainCat]         = useState('');
   const [drillDomainLogs, setDrillDomainLogs]       = useState<any[]>([]);
   const [drillDomainLoading, setDrillDomainLoading] = useState(false);
+  const [drillDomainError, setDrillDomainError]     = useState<string | null>(null);
 
   /* ── Agent violations drill-down ── */
   const [drillAgent, setDrillAgent]                 = useState<any | null>(null);
@@ -1424,10 +1425,15 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
     if (!drillDomain) return;
     setDrillDomainLoading(true);
     setDrillDomainLogs([]);
-    fetch(`${getBaseUrl()}/api/logs/domain/${encodeURIComponent(drillDomain)}?limit=500`)
-      .then(r => r.json())
+    setDrillDomainError(null);
+    const url = `${getBaseUrl()}/api/logs/domain/${encodeURIComponent(drillDomain)}?limit=500`;
+    fetch(url)
+      .then(r => {
+        if (!r.ok) throw new Error(`Server returned ${r.status} for ${url}`);
+        return r.json();
+      })
       .then(d => setDrillDomainLogs(Array.isArray(d) ? d : []))
-      .catch(() => setDrillDomainLogs([]))
+      .catch(e => { console.error('[domain drill]', e); setDrillDomainError(e.message); })
       .finally(() => setDrillDomainLoading(false));
   }, [drillDomain]);
 
@@ -1791,6 +1797,11 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
           <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
             {drillDomainLoading ? (
               <div className="p-6 space-y-2">{[...Array(5)].map((_, i) => <div key={i} className="skeleton h-8 rounded" />)}</div>
+            ) : drillDomainError ? (
+              <div className="p-6 text-center">
+                <p className="text-xs text-rose-400 font-mono break-all">{drillDomainError}</p>
+                <p className="text-[10px] text-[var(--text-muted)] mt-1">Check the browser console and collector logs for details.</p>
+              </div>
             ) : (
               <table className="w-full text-left border-collapse">
                 <thead>
