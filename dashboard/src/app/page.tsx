@@ -1122,8 +1122,9 @@ function MachineStatusView({
 
       {/* ── Inspect Modal ── */}
       {inspectMachine && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
-          <div className="relative w-full sm:max-w-4xl max-h-[90svh] sm:max-h-[90vh] bg-[var(--bg-card)] rounded-t-2xl sm:rounded-2xl border border-[var(--border-ui)] shadow-2xl flex flex-col overflow-hidden animate-scale-in">
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/80 backdrop-blur-sm animate-fade-in">
+          <div className="flex min-h-full items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="relative w-full sm:max-w-4xl max-h-[90vh] bg-[var(--bg-card)] rounded-t-2xl sm:rounded-2xl border border-[var(--border-ui)] shadow-2xl flex flex-col overflow-hidden animate-scale-in">
 
             {/* Modal header */}
             <div className="shrink-0 px-5 py-4 border-b border-[var(--border-ui)] bg-[var(--bg-card-alt)]/80 flex items-center gap-3">
@@ -1377,6 +1378,7 @@ function MachineStatusView({
                 </>
               )}
             </div>
+          </div>
           </div>
         </div>
       )}
