@@ -61,6 +61,7 @@ const CATEGORY: Record<string, { label: string; tone: Tone }> = {
   gambling:    { label: 'Gambling',  tone: 'danger' },
   streaming:   { label: 'Streaming', tone: 'warn' },
   ph_shopping: { label: 'Shopping',  tone: 'brand' },
+  adult:       { label: 'Adult',     tone: 'danger' },
   manual:      { label: 'Policy',    tone: 'neutral' },
 };
 const getCategory = (c: string) => CATEGORY[c] || { label: c || 'Policy', tone: 'neutral' as Tone };

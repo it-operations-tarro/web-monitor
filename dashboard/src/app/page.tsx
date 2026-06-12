@@ -82,6 +82,7 @@ const CATEGORY: Record<string, { label: string; tone: Tone }> = {
   gambling:    { label: 'Gambling',  tone: 'danger' },
   streaming:   { label: 'Streaming', tone: 'warn' },
   ph_shopping: { label: 'Shopping',  tone: 'brand' },
+  adult:       { label: 'Adult',     tone: 'danger' },
   manual:      { label: 'Policy',    tone: 'neutral' },
 };
 const getCategory = (c: string) => CATEGORY[c] || { label: c || 'Policy', tone: 'neutral' as Tone };
@@ -1498,7 +1499,7 @@ function MachineStatusView({
 }
 
 // ─── enforcement tab ──────────────────────────────────────────────────────
-const BUILTIN_CATEGORIES = ['social', 'gambling', 'streaming', 'ph_shopping', 'manual'];
+const BUILTIN_CATEGORIES = ['social', 'gambling', 'streaming', 'ph_shopping', 'adult', 'manual'];
 
 function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUrl: () => string; onRefresh: () => void }) {
   const [domainRaw, setDomainRaw] = useState('');
