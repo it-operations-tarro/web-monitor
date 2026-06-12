@@ -1154,7 +1154,8 @@ app.listen(PORT, '0.0.0.0', () => {
 const CATEGORY_URLS = {
   social: 'https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/social/hosts',
   gambling: 'https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/gambling/hosts',
-  streaming: 'https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/fakenews-gambling/hosts'
+  streaming: 'https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/fakenews-gambling/hosts',
+  adult: 'https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/porn-only/hosts'
 };
 
 // PH Shopping Preset (High-Traffic PH E-Commerce)
@@ -1186,6 +1187,22 @@ const PH_STREAMING_PRESET = [
   // Anime Specific
   'gogoanime.pe', 'animepahe.com', '9anime.to', 'aniwave.to', 'aniwaves.ru', 
   'kissanime.com.ru', 'ani-cli.com', 'zoro.to', 'animesuge.to', 'animixplay.to', 'hidive.com'
+];
+
+// Adult Content Preset (Top-traffic adult sites — guaranteed coverage even if upstream fetch fails)
+const ADULT_PRESET = [
+  'pornhub.com', 'www.pornhub.com',
+  'xvideos.com', 'www.xvideos.com',
+  'xnxx.com', 'www.xnxx.com',
+  'xhamster.com', 'www.xhamster.com',
+  'redtube.com', 'www.redtube.com',
+  'youporn.com', 'www.youporn.com',
+  'spankbang.com', 'www.spankbang.com',
+  'onlyfans.com', 'www.onlyfans.com',
+  'chaturbate.com', 'www.chaturbate.com',
+  'stripchat.com', 'www.stripchat.com',
+  'brazzers.com', 'www.brazzers.com',
+  'tnaflix.com', 'www.tnaflix.com'
 ];
 
 // Core Category Mapping (Guarantees major sites have correct labels)
@@ -1242,6 +1259,15 @@ async function syncBlacklists() {
         categoryMap[domain] = 'streaming';
       });
       console.log(`[SYNC] Added PH Streaming Preset (${PH_STREAMING_PRESET.length} domains)`);
+    }
+
+    // 4b. Add Adult Preset
+    if (config.categories?.includes('adult')) {
+      ADULT_PRESET.forEach(domain => {
+        newBlacklist.add(domain);
+        categoryMap[domain] = 'adult';
+      });
+      console.log(`[SYNC] Added Adult Preset (${ADULT_PRESET.length} domains)`);
     }
 
     // 5. Fetch external categories from GitHub
