@@ -43,6 +43,41 @@ if (!JWT_SECRET) {
 const app = express();
 const PORT = process.env.PORT || 4448;
 
+// Slack incoming-webhook for violation notifications.
+// The channel is determined by the webhook itself (set in Slack when you create it).
+// Leave unset to disable notifications.
+const SLACK_WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL || '';
+
+function sendSlackViolationNotification({ username, machine_id, domain, full_url, category, timestamp }) {
+  if (!SLACK_WEBHOOK_URL) return;
+
+  const text = `:warning: *Violation detected*\n` +
+    `*Agent:* ${username || '(unknown)'}\n` +
+    `*Machine:* ${machine_id}\n` +
+    `*Site:* ${domain}${full_url ? ` (<${full_url}|open>)` : ''}\n` +
+    `*Category:* ${category || 'unknown'}\n` +
+    `*Time:* ${timestamp}`;
+
+  let url;
+  try { url = new URL(SLACK_WEBHOOK_URL); }
+  catch (e) { console.warn('[Slack] Invalid SLACK_WEBHOOK_URL:', e.message); return; }
+
+  const body = JSON.stringify({ text });
+  const req = https.request({
+    method: 'POST',
+    hostname: url.hostname,
+    port: url.port || 443,
+    path: url.pathname + url.search,
+    headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+  }, (res) => {
+    if (res.statusCode >= 400) console.warn(`[Slack] Webhook returned ${res.statusCode}`);
+    res.resume();
+  });
+  req.on('error', (e) => console.warn('[Slack] Webhook error:', e.message));
+  req.write(body);
+  req.end();
+}
+
 // Middleware
 app.use(cors());
 app.use(express.json());
@@ -207,6 +242,9 @@ app.post('/logs', (req, res) => {
       return res.status(500).json({ error: 'Failed to save log' });
     }
     console.log(`[LOG] Recieved from ${machine_id}: ${domain} [Violation: ${violation ? 'YES' : 'NO'}]`);
+    if (violation) {
+      sendSlackViolationNotification({ username, machine_id, domain, full_url, category, timestamp });
+    }
     res.status(201).json({ status: 'success' });
   });
 });
