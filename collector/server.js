@@ -387,10 +387,13 @@ app.post('/api/enforcement/domains', (req, res) => {
     config.category_map = config.category_map || {};
     config.blacklist = config.blacklist || [];
     config.manual_blacklist = config.manual_blacklist || [];
+    config.user_category_map = config.user_category_map || {};
     for (const domain of list) {
       config.category_map[domain] = category;
+      config.user_category_map[domain] = category;
       if (!config.blacklist.includes(domain)) config.blacklist.push(domain);
-      if (category === 'manual' && !config.manual_blacklist.includes(domain)) {
+      // Ensure user-added domains survive the periodic sync rebuild.
+      if (!config.manual_blacklist.includes(domain)) {
         config.manual_blacklist.push(domain);
       }
     }
@@ -409,6 +412,7 @@ app.delete('/api/enforcement/domains/:domain', (req, res) => {
     config.blacklist = (config.blacklist || []).filter(d => d !== domain);
     config.manual_blacklist = (config.manual_blacklist || []).filter(d => d !== domain);
     delete (config.category_map || {})[domain];
+    delete (config.user_category_map || {})[domain];
     writeConfig(config);
     res.json({ status: 'removed' });
   } catch (e) {
@@ -1291,6 +1295,12 @@ async function syncBlacklists() {
     (config.manual_blacklist || []).forEach(domain => {
       newBlacklist.add(domain);
       if (!categoryMap[domain]) categoryMap[domain] = 'manual';
+    });
+
+    // 7. Apply user category overrides — dashboard-assigned categories win over presets/upstream
+    Object.entries(config.user_category_map || {}).forEach(([domain, cat]) => {
+      newBlacklist.add(domain);
+      categoryMap[domain] = cat;
     });
 
     // Update config with the expanded list and category map
