@@ -564,8 +564,10 @@ function PortalDashboard({ token, user, onLogout }: { token: string; user: any; 
                     style={{ minWidth: 160 }}
                   >
                     <option value="">All Team Leads</option>
-                    {teamLeads.map((tl: any) => (
-                      <option key={tl.id} value={String(tl.id)}>{tl.name}</option>
+                    {teamLeads.filter((tl: any) => tl?.id != null).map((tl: any) => (
+                      <option key={String(tl.id)} value={String(tl.id)}>
+                        {tl.name || tl.username}
+                      </option>
                     ))}
                   </select>
                   <ChevronDown size={11} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] pointer-events-none" />

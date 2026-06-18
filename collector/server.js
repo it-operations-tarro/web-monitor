@@ -968,7 +968,7 @@ app.get('/api/portal/dashboard', requireAuth, async (req, res) => {
     } else if (role === 'director' && teamMembers.length > 0) {
       const mgrIds = teamMembers.map(m => m.id);
       teamLeads = await dbAll(
-        `SELECT pu.id, pu.name, pu.username, pu.role
+        `SELECT DISTINCT pu.id, pu.name, pu.username, pu.role
          FROM user_assignments ua JOIN portal_users pu ON pu.id = ua.child_id
          WHERE ua.parent_id IN (${mgrIds.map(() => '?').join(',')})`,
         mgrIds
