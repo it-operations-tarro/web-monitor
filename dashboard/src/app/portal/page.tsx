@@ -265,6 +265,7 @@ function PortalDashboard({ token, user, onLogout }: { token: string; user: any; 
   const [inspectLogsLoading, setInspectLogsLoading] = useState(false);
   const [inspectDate, setInspectDate]       = useState<string>(todayStr());
   const [agentSearch, setAgentSearch]       = useState('');
+  const [teamLeadFilter, setTeamLeadFilter] = useState<string | null>(null);
   const LOG_PAGE_SIZE = 15;
 
   const getBaseUrl = () => `http://${window.location.hostname}:4448`;
@@ -400,10 +401,22 @@ function PortalDashboard({ token, user, onLogout }: { token: string; user: any; 
   const topDomains = data?.topDomains || [];
   const bwViolations = data?.bwViolations || [];
   const teamMembers = data?.teamMembers || [];
+  const teamLeads: any[] = data?.teamLeads || [];
   const machineIds: string[] = data?.machineIds || [];
   const assignedAgents: any[] = data?.assignedAgents || [];
 
   const onlineCount = assignedAgents.filter(
+    a => new Date().getTime() - new Date(a.last_seen).getTime() < 120000
+  ).length;
+
+  const filteredAgents = assignedAgents.filter(a => {
+    const matchesSearch = !agentSearch ||
+      (a.username || '').toLowerCase().includes(agentSearch.toLowerCase()) ||
+      (a.machine_id || '').toLowerCase().includes(agentSearch.toLowerCase());
+    const matchesTL = !teamLeadFilter || String(a.team_lead_id) === teamLeadFilter;
+    return matchesSearch && matchesTL;
+  });
+  const filteredOnlineCount = filteredAgents.filter(
     a => new Date().getTime() - new Date(a.last_seen).getTime() < 120000
   ).length;
 
@@ -510,19 +523,21 @@ function PortalDashboard({ token, user, onLogout }: { token: string; user: any; 
             <PanelHeader
               accent="brand"
               title="Assigned Agents"
-              subtitle={`${onlineCount} online · ${assignedAgents.length - onlineCount} offline`}
+              subtitle={teamLeadFilter
+                ? `${filteredOnlineCount} online · ${filteredAgents.length - filteredOnlineCount} offline (filtered)`
+                : `${onlineCount} online · ${assignedAgents.length - onlineCount} offline`}
               right={
                 <div className="flex items-center gap-2">
-                  <StatusPill tone="success" label={`${onlineCount} online`} pulse={onlineCount > 0} />
-                  {assignedAgents.length - onlineCount > 0 && (
-                    <StatusPill tone="neutral" label={`${assignedAgents.length - onlineCount} offline`} />
+                  <StatusPill tone="success" label={`${teamLeadFilter ? filteredOnlineCount : onlineCount} online`} pulse={(teamLeadFilter ? filteredOnlineCount : onlineCount) > 0} />
+                  {(teamLeadFilter ? filteredAgents.length - filteredOnlineCount : assignedAgents.length - onlineCount) > 0 && (
+                    <StatusPill tone="neutral" label={`${teamLeadFilter ? filteredAgents.length - filteredOnlineCount : assignedAgents.length - onlineCount} offline`} />
                   )}
                 </div>
               }
             />
-            {/* Search */}
-            <div className="px-4 py-3 border-b border-[var(--border-ui)] flex items-center gap-3">
-              <div className="relative flex-1 max-w-sm">
+            {/* Search + Team Lead filter */}
+            <div className="px-4 py-3 border-b border-[var(--border-ui)] flex flex-wrap items-center gap-3">
+              <div className="relative flex-1 min-w-[160px] max-w-sm">
                 <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] pointer-events-none" />
                 <input
                   type="text"
@@ -537,18 +552,43 @@ function PortalDashboard({ token, user, onLogout }: { token: string; user: any; 
                   </button>
                 )}
               </div>
-              <span className="text-[11px] text-[var(--text-muted)]">
-                {assignedAgents.filter(a => !agentSearch || (a.username || '').toLowerCase().includes(agentSearch.toLowerCase()) || (a.machine_id || '').toLowerCase().includes(agentSearch.toLowerCase())).length} agent(s)
+
+              {/* Team Lead dropdown — managers and directors only */}
+              {(user.role === 'manager' || user.role === 'director') && teamLeads.length > 0 && (
+                <div className="relative">
+                  <Users size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] pointer-events-none" />
+                  <select
+                    value={teamLeadFilter || ''}
+                    onChange={e => setTeamLeadFilter(e.target.value || null)}
+                    className="cursor-pointer bg-[var(--bg-page)] border border-[var(--border-ui)] rounded-lg pl-8 pr-7 py-1.5 text-xs text-[var(--text-main)] focus:outline-none focus:border-[#6a29e1]/60 transition-colors appearance-none"
+                    style={{ minWidth: 160 }}
+                  >
+                    <option value="">All Team Leads</option>
+                    {teamLeads.map((tl: any) => (
+                      <option key={tl.id} value={String(tl.id)}>{tl.name}</option>
+                    ))}
+                  </select>
+                  <ChevronDown size={11} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] pointer-events-none" />
+                  {teamLeadFilter && (
+                    <button
+                      onClick={() => setTeamLeadFilter(null)}
+                      className="cursor-pointer absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-[#6a29e1] flex items-center justify-center text-white hover:bg-[#7c3aed] transition-colors"
+                      title="Clear team lead filter"
+                    >
+                      <X size={8} />
+                    </button>
+                  )}
+                </div>
+              )}
+
+              <span className="text-[11px] text-[var(--text-muted)] ml-auto">
+                {filteredAgents.length} agent(s)
               </span>
             </div>
 
             {/* Agent cards grid */}
             <div className="p-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-              {assignedAgents
-                .filter(a => !agentSearch ||
-                  (a.username || '').toLowerCase().includes(agentSearch.toLowerCase()) ||
-                  (a.machine_id || '').toLowerCase().includes(agentSearch.toLowerCase())
-                )
+              {filteredAgents
                 .map((agent: any) => {
                   const online = new Date().getTime() - new Date(agent.last_seen).getTime() < 120000;
                   const heavy  = agent.current_bandwidth > 10 * 1024 * 1024;

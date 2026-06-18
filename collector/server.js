@@ -961,6 +961,31 @@ app.get('/api/portal/dashboard', requireAuth, async (req, res) => {
       );
     }
 
+    // Build team leads list and attach team_lead_id to each agent (for manager/director filtering)
+    let teamLeads = [];
+    if (role === 'manager') {
+      teamLeads = teamMembers; // for managers, direct reports are the team leads
+    } else if (role === 'director' && teamMembers.length > 0) {
+      const mgrIds = teamMembers.map(m => m.id);
+      teamLeads = await dbAll(
+        `SELECT pu.id, pu.name, pu.username, pu.role
+         FROM user_assignments ua JOIN portal_users pu ON pu.id = ua.child_id
+         WHERE ua.parent_id IN (${mgrIds.map(() => '?').join(',')})`,
+        mgrIds
+      );
+    }
+
+    if (teamLeads.length > 0 && assignedAgents.length > 0) {
+      const tlIds = teamLeads.map(tl => tl.id);
+      const tlAssignments = await dbAll(
+        `SELECT user_id AS team_lead_id, agent_email FROM agent_assignments WHERE user_id IN (${tlIds.map(() => '?').join(',')})`,
+        tlIds
+      );
+      const emailToTL = {};
+      tlAssignments.forEach(r => { emailToTL[r.agent_email] = r.team_lead_id; });
+      assignedAgents = assignedAgents.map(a => ({ ...a, team_lead_id: emailToTL[a.username] ?? null }));
+    }
+
     res.json({
       user: { id, name, username, role },
       machineIds,
@@ -970,6 +995,7 @@ app.get('/api/portal/dashboard', requireAuth, async (req, res) => {
       topDomains,
       bwViolations,
       teamMembers,
+      teamLeads,
     });
   } catch (e) {
     console.error('[PORTAL]', e);

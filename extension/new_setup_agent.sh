@@ -1,4 +1,4 @@
-#!/bin/bash
+﻿#!/bin/bash
 
 # ==============================================================================
 # Agent Browser Monitor - Zorin OS Auto-Setup Script (v4.0)
