@@ -642,7 +642,9 @@ app.post('/api/users/:id/reset-password', async (req, res) => {
 app.get('/api/users', async (req, res) => {
   try {
     const users = await dbAll(`
-      SELECT id, name, username, email, role, created_at FROM portal_users ORDER BY created_at DESC
+      SELECT id, name, username, email, role, created_at FROM portal_users
+      ORDER BY CASE role WHEN 'director' THEN 1 WHEN 'manager' THEN 2 WHEN 'team_lead' THEN 3 ELSE 4 END,
+               created_at DESC
     `);
     // Attach assignment counts
     for (const u of users) {
