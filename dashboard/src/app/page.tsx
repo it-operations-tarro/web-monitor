@@ -2090,6 +2090,9 @@ function UnassignedAgentsPanel({
   const [loading, setLoading] = useState(true);
   const [selections, setSelections] = useState<Record<string, string>>({}); // email → tlId
   const [assigning, setAssigning] = useState<Record<string, boolean>>({});
+  const [unassignedPage, setUnassignedPage] = useState(0);
+
+  useEffect(() => { setUnassignedPage(0); }, [agents]);
 
   const fetchUnassigned = useCallback(async () => {
     try {
@@ -2141,6 +2144,10 @@ function UnassignedAgentsPanel({
   const allSelected = agents.length > 0 && agents.every(a => selections[a.username]);
   const someSelected = agents.some(a => selections[a.username]);
 
+  const totalUnassignedPages = Math.max(1, Math.ceil(agents.length / PAGE_SIZE));
+  const safeUnassignedPage   = Math.min(unassignedPage, totalUnassignedPages - 1);
+  const paginatedAgents      = agents.slice(safeUnassignedPage * PAGE_SIZE, (safeUnassignedPage + 1) * PAGE_SIZE);
+
   return (
     <Panel className="border-amber-500/30">
       <PanelHeader
@@ -2181,7 +2188,7 @@ function UnassignedAgentsPanel({
           {loading && (
             <tr><td colSpan={6} className="px-4 py-6 text-center text-xs text-[var(--text-muted)] italic">Loading…</td></tr>
           )}
-          {agents.map(agent => {
+          {paginatedAgents.map(agent => {
             const online = isOnline(agent.last_seen);
             const selectedTl = selections[agent.username] || '';
             const busy = assigning[agent.username];
@@ -2227,6 +2234,48 @@ function UnassignedAgentsPanel({
         </tbody>
       </table>
       </div>
+      {totalUnassignedPages > 1 && (
+        <div className="px-4 py-3 border-t border-[var(--border-ui)] flex items-center justify-between gap-3">
+          <button
+            onClick={() => setUnassignedPage(p => Math.max(0, p - 1))}
+            disabled={safeUnassignedPage === 0}
+            className="cursor-pointer flex items-center gap-1 px-3 py-1.5 rounded-lg border border-[var(--border-ui)] bg-[var(--bg-card-alt)] text-xs font-medium text-[var(--text-muted)] hover:text-[var(--text-main)] hover:border-[#6a29e1]/40 disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-150"
+          >
+            <ChevronLeft size={13} />
+            Previous
+          </button>
+          <div className="flex items-center gap-1">
+            {Array.from({ length: totalUnassignedPages }, (_, i) => {
+              const showPage = i === 0 || i === totalUnassignedPages - 1 || Math.abs(i - safeUnassignedPage) <= 1;
+              const showEllipsisBefore = i === safeUnassignedPage - 2 && safeUnassignedPage > 2;
+              const showEllipsisAfter  = i === safeUnassignedPage + 2 && safeUnassignedPage < totalUnassignedPages - 3;
+              if (showEllipsisBefore || showEllipsisAfter) return <span key={i} className="px-1 text-[var(--text-muted)] text-xs">…</span>;
+              if (!showPage) return null;
+              return (
+                <button
+                  key={i}
+                  onClick={() => setUnassignedPage(i)}
+                  className={`cursor-pointer w-7 h-7 rounded-md text-xs font-semibold transition-all duration-150 ${
+                    i === safeUnassignedPage
+                      ? 'bg-[#6a29e1] text-white shadow-sm shadow-[#6a29e1]/40'
+                      : 'border border-[var(--border-ui)] text-[var(--text-muted)] hover:text-[var(--text-main)] hover:border-[#6a29e1]/40'
+                  }`}
+                >
+                  {i + 1}
+                </button>
+              );
+            })}
+          </div>
+          <button
+            onClick={() => setUnassignedPage(p => Math.min(totalUnassignedPages - 1, p + 1))}
+            disabled={safeUnassignedPage === totalUnassignedPages - 1}
+            className="cursor-pointer flex items-center gap-1 px-3 py-1.5 rounded-lg border border-[var(--border-ui)] bg-[var(--bg-card-alt)] text-xs font-medium text-[var(--text-muted)] hover:text-[var(--text-main)] hover:border-[#6a29e1]/40 disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-150"
+          >
+            Next
+            <ChevronRight size={13} />
+          </button>
+        </div>
+      )}
     </Panel>
   );
 }
@@ -2450,6 +2499,7 @@ function UserManagementTab({ getBaseUrl }: { getBaseUrl: () => string }) {
   const [resetError, setResetError] = useState('');
   const [resetSaving, setResetSaving] = useState(false);
   const [resetSuccess, setResetSuccess] = useState(false);
+  const [usersPage, setUsersPage] = useState(0);
 
   const fetchUsers = useCallback(async () => {
     try {
@@ -2562,6 +2612,10 @@ function UserManagementTab({ getBaseUrl }: { getBaseUrl: () => string }) {
   const teamLeads = users.filter(u => u.role === 'team_lead');
   const managers = users.filter(u => u.role === 'manager');
 
+  const totalUserPages = Math.max(1, Math.ceil(users.length / PAGE_SIZE));
+  const safeUserPage   = Math.min(usersPage, totalUserPages - 1);
+  const paginatedUsers = users.slice(safeUserPage * PAGE_SIZE, (safeUserPage + 1) * PAGE_SIZE);
+
   return (
     <div className="space-y-4">
       {/* summary tiles */}
@@ -2669,7 +2723,7 @@ function UserManagementTab({ getBaseUrl }: { getBaseUrl: () => string }) {
             {!loading && users.length === 0 && (
               <tr><td colSpan={6} className="px-4 py-8 text-center text-xs text-[var(--text-muted)] italic">No portal accounts yet. Create one above.</td></tr>
             )}
-            {users.map(user => (
+            {paginatedUsers.map(user => (
               <Fragment key={user.id}>
                 <tr className="hover:bg-[var(--bg-card-alt)] transition-colors group">
                   <td className={TD}>
@@ -2810,6 +2864,48 @@ function UserManagementTab({ getBaseUrl }: { getBaseUrl: () => string }) {
           </tbody>
         </table>
         </div>
+        {totalUserPages > 1 && (
+          <div className="px-4 py-3 border-t border-[var(--border-ui)] flex items-center justify-between gap-3">
+            <button
+              onClick={() => setUsersPage(p => Math.max(0, p - 1))}
+              disabled={safeUserPage === 0}
+              className="cursor-pointer flex items-center gap-1 px-3 py-1.5 rounded-lg border border-[var(--border-ui)] bg-[var(--bg-card-alt)] text-xs font-medium text-[var(--text-muted)] hover:text-[var(--text-main)] hover:border-[#6a29e1]/40 disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-150"
+            >
+              <ChevronLeft size={13} />
+              Previous
+            </button>
+            <div className="flex items-center gap-1">
+              {Array.from({ length: totalUserPages }, (_, i) => {
+                const showPage = i === 0 || i === totalUserPages - 1 || Math.abs(i - safeUserPage) <= 1;
+                const showEllipsisBefore = i === safeUserPage - 2 && safeUserPage > 2;
+                const showEllipsisAfter  = i === safeUserPage + 2 && safeUserPage < totalUserPages - 3;
+                if (showEllipsisBefore || showEllipsisAfter) return <span key={i} className="px-1 text-[var(--text-muted)] text-xs">…</span>;
+                if (!showPage) return null;
+                return (
+                  <button
+                    key={i}
+                    onClick={() => setUsersPage(i)}
+                    className={`cursor-pointer w-7 h-7 rounded-md text-xs font-semibold transition-all duration-150 ${
+                      i === safeUserPage
+                        ? 'bg-[#6a29e1] text-white shadow-sm shadow-[#6a29e1]/40'
+                        : 'border border-[var(--border-ui)] text-[var(--text-muted)] hover:text-[var(--text-main)] hover:border-[#6a29e1]/40'
+                    }`}
+                  >
+                    {i + 1}
+                  </button>
+                );
+              })}
+            </div>
+            <button
+              onClick={() => setUsersPage(p => Math.min(totalUserPages - 1, p + 1))}
+              disabled={safeUserPage === totalUserPages - 1}
+              className="cursor-pointer flex items-center gap-1 px-3 py-1.5 rounded-lg border border-[var(--border-ui)] bg-[var(--bg-card-alt)] text-xs font-medium text-[var(--text-muted)] hover:text-[var(--text-main)] hover:border-[#6a29e1]/40 disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-150"
+            >
+              Next
+              <ChevronRight size={13} />
+            </button>
+          </div>
+        )}
       </Panel>
 
       <UnassignedAgentsPanel getBaseUrl={getBaseUrl} teamLeads={teamLeads} onAssigned={fetchUsers} />
