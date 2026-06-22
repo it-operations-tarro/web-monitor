@@ -266,7 +266,9 @@ function PortalDashboard({ token, user, onLogout }: { token: string; user: any; 
   const [inspectDate, setInspectDate]       = useState<string>(todayStr());
   const [agentSearch, setAgentSearch]       = useState('');
   const [teamLeadFilter, setTeamLeadFilter] = useState<string | null>(null);
+  const [agentsPage, setAgentsPage]         = useState(0);
   const LOG_PAGE_SIZE = 15;
+  const AGENTS_PAGE_SIZE = 15;
 
   const getBaseUrl = () => `http://${window.location.hostname}:4448`;
 
@@ -420,6 +422,10 @@ function PortalDashboard({ token, user, onLogout }: { token: string; user: any; 
     a => new Date().getTime() - new Date(a.last_seen).getTime() < 120000
   ).length;
 
+  const totalAgentPages  = Math.max(1, Math.ceil(filteredAgents.length / AGENTS_PAGE_SIZE));
+  const safeAgentPage    = Math.min(agentsPage, totalAgentPages - 1);
+  const paginatedAgents  = filteredAgents.slice(safeAgentPage * AGENTS_PAGE_SIZE, (safeAgentPage + 1) * AGENTS_PAGE_SIZE);
+
   return (
     <div className="min-h-screen bg-[var(--bg-page)] text-[var(--text-main)] transition-colors duration-300">
       {/* topbar */}
@@ -543,11 +549,11 @@ function PortalDashboard({ token, user, onLogout }: { token: string; user: any; 
                   type="text"
                   placeholder="Filter agents…"
                   value={agentSearch}
-                  onChange={e => setAgentSearch(e.target.value)}
+                  onChange={e => { setAgentSearch(e.target.value); setAgentsPage(0); }}
                   className="w-full bg-[var(--bg-page)] border border-[var(--border-ui)] rounded-lg pl-8 pr-3 py-1.5 text-xs text-[var(--text-main)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[#6a29e1]/60 transition-colors"
                 />
                 {agentSearch && (
-                  <button onClick={() => setAgentSearch('')} className="cursor-pointer absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-main)]">
+                  <button onClick={() => { setAgentSearch(''); setAgentsPage(0); }} className="cursor-pointer absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-main)]">
                     <X size={11} />
                   </button>
                 )}
@@ -559,7 +565,7 @@ function PortalDashboard({ token, user, onLogout }: { token: string; user: any; 
                   <Users size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] pointer-events-none" />
                   <select
                     value={teamLeadFilter || ''}
-                    onChange={e => setTeamLeadFilter(e.target.value || null)}
+                    onChange={e => { setTeamLeadFilter(e.target.value || null); setAgentsPage(0); }}
                     className="cursor-pointer bg-[var(--bg-page)] border border-[var(--border-ui)] rounded-lg pl-8 pr-7 py-1.5 text-xs text-[var(--text-main)] focus:outline-none focus:border-[#6a29e1]/60 transition-colors appearance-none"
                     style={{ minWidth: 160 }}
                   >
@@ -573,7 +579,7 @@ function PortalDashboard({ token, user, onLogout }: { token: string; user: any; 
                   <ChevronDown size={11} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] pointer-events-none" />
                   {teamLeadFilter && (
                     <button
-                      onClick={() => setTeamLeadFilter(null)}
+                      onClick={() => { setTeamLeadFilter(null); setAgentsPage(0); }}
                       className="cursor-pointer absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-[#6a29e1] flex items-center justify-center text-white hover:bg-[#7c3aed] transition-colors"
                       title="Clear team lead filter"
                     >
@@ -583,8 +589,8 @@ function PortalDashboard({ token, user, onLogout }: { token: string; user: any; 
                 </div>
               )}
 
-              <span className="text-[11px] text-[var(--text-muted)] ml-auto">
-                {filteredAgents.length} agent(s)
+              <span className="text-[11px] text-[var(--text-muted)] ml-auto tabular-nums">
+                {filteredAgents.length} agent(s){totalAgentPages > 1 && ` · page ${safeAgentPage + 1} of ${totalAgentPages}`}
               </span>
             </div>
 
@@ -603,7 +609,7 @@ function PortalDashboard({ token, user, onLogout }: { token: string; user: any; 
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[var(--border-ui)]">
-                  {filteredAgents.map((agent: any) => {
+                  {paginatedAgents.map((agent: any) => {
                     const online = new Date().getTime() - new Date(agent.last_seen).getTime() < 120000;
                     const heavy  = agent.current_bandwidth > 10 * 1024 * 1024;
                     return (
@@ -652,6 +658,48 @@ function PortalDashboard({ token, user, onLogout }: { token: string; user: any; 
                 </tbody>
               </table>
             </div>
+            {totalAgentPages > 1 && (
+              <div className="px-4 py-3 border-t border-[var(--border-ui)] flex items-center justify-between gap-3">
+                <button
+                  onClick={() => setAgentsPage(p => Math.max(0, p - 1))}
+                  disabled={safeAgentPage === 0}
+                  className="cursor-pointer flex items-center gap-1 px-3 py-1.5 rounded-lg border border-[var(--border-ui)] bg-[var(--bg-card-alt)] text-xs font-medium text-[var(--text-muted)] hover:text-[var(--text-main)] hover:border-[#6a29e1]/40 disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-150"
+                >
+                  <ChevronLeft size={13} />
+                  Previous
+                </button>
+                <div className="flex items-center gap-1">
+                  {Array.from({ length: totalAgentPages }, (_, i) => {
+                    const showPage = i === 0 || i === totalAgentPages - 1 || Math.abs(i - safeAgentPage) <= 1;
+                    const showEllipsisBefore = i === safeAgentPage - 2 && safeAgentPage > 2;
+                    const showEllipsisAfter  = i === safeAgentPage + 2 && safeAgentPage < totalAgentPages - 3;
+                    if (showEllipsisBefore || showEllipsisAfter) return <span key={i} className="px-1 text-[var(--text-muted)] text-xs">…</span>;
+                    if (!showPage) return null;
+                    return (
+                      <button
+                        key={i}
+                        onClick={() => setAgentsPage(i)}
+                        className={`cursor-pointer w-7 h-7 rounded-md text-xs font-semibold transition-all duration-150 ${
+                          i === safeAgentPage
+                            ? 'bg-[#6a29e1] text-white shadow-sm shadow-[#6a29e1]/40'
+                            : 'border border-[var(--border-ui)] text-[var(--text-muted)] hover:text-[var(--text-main)] hover:border-[#6a29e1]/40'
+                        }`}
+                      >
+                        {i + 1}
+                      </button>
+                    );
+                  })}
+                </div>
+                <button
+                  onClick={() => setAgentsPage(p => Math.min(totalAgentPages - 1, p + 1))}
+                  disabled={safeAgentPage === totalAgentPages - 1}
+                  className="cursor-pointer flex items-center gap-1 px-3 py-1.5 rounded-lg border border-[var(--border-ui)] bg-[var(--bg-card-alt)] text-xs font-medium text-[var(--text-muted)] hover:text-[var(--text-main)] hover:border-[#6a29e1]/40 disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-150"
+                >
+                  Next
+                  <ChevronRight size={13} />
+                </button>
+              </div>
+            )}
           </Panel>
         )}
 
