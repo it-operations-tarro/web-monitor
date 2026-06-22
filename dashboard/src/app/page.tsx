@@ -1531,6 +1531,11 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
   const [drillAgentHasMore, setDrillAgentHasMore]   = useState(false);
   const DRILL_PAGE = 15;
 
+  const [viewCat, setViewCat]               = useState<string | null>(null);
+  const [viewCatDomains, setViewCatDomains] = useState<string[]>([]);
+  const [viewCatLoading, setViewCatLoading] = useState(false);
+  const [viewCatSearch, setViewCatSearch]   = useState('');
+
   useEffect(() => {
     if (!drillDomain) return;
     setDrillDomainLoading(true);
@@ -1661,6 +1666,34 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
     } finally { setToggling(null); }
   };
 
+  const openViewCat = async (cat: string) => {
+    setViewCat(cat);
+    setViewCatSearch('');
+    setViewCatDomains([]);
+    setViewCatLoading(true);
+    try {
+      const res = await fetch(`${getBaseUrl()}/api/enforcement/domains?category=${encodeURIComponent(cat)}`, { cache: 'no-store' });
+      if (res.ok) setViewCatDomains(await res.json());
+    } catch {}
+    setViewCatLoading(false);
+  };
+
+  const removeDomainFromView = async (domain: string) => {
+    setRemoving(domain);
+    try {
+      await fetch(`${getBaseUrl()}/api/enforcement/domains/${encodeURIComponent(domain)}`, { method: 'DELETE' });
+      setViewCatDomains(prev => prev.filter(d => d !== domain));
+      onRefresh();
+    } finally { setRemoving(null); }
+  };
+
+  const normalizedViewSearch = viewCatSearch.trim().toLowerCase()
+    .replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+  const filteredViewDomains = normalizedViewSearch
+    ? viewCatDomains.filter(d => d.includes(normalizedViewSearch))
+    : viewCatDomains;
+  const exactViewMatch = normalizedViewSearch ? viewCatDomains.includes(normalizedViewSearch) : false;
+
   return (
     <>
     <div className="space-y-3">
@@ -1756,11 +1789,19 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
                   </td>
                   <td className={`${TD} text-right`}>
                     <div className="flex items-center justify-end gap-1">
+                      <button
+                        onClick={() => openViewCat(cat)}
+                        className="cursor-pointer flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium rounded-md border border-[var(--border-ui)] text-[var(--text-muted)] hover:text-[#c4b5fd] hover:border-[#6a29e1]/40 hover:bg-[#6a29e1]/10 transition-colors"
+                        title={`View domains in ${cat}`}
+                      >
+                        <Eye size={11} />
+                        View
+                      </button>
                       {cat !== 'manual' && (
                         <button
                           onClick={() => toggleCategory(cat)}
                           disabled={busy}
-                          className={`px-2.5 py-1 text-[11px] font-medium rounded-md border transition-colors disabled:opacity-40 ${
+                          className={`cursor-pointer px-2.5 py-1 text-[11px] font-medium rounded-md border transition-colors disabled:opacity-40 ${
                             isOn
                               ? 'border-rose-500/30 text-rose-300 hover:bg-rose-500/10'
                               : 'border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/10'
@@ -1773,7 +1814,7 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
                         <button
                           onClick={() => deleteCategory(cat)}
                           disabled={busy}
-                          className="p-1.5 text-[var(--text-muted)] hover:text-rose-300 hover:bg-rose-500/10 rounded-md transition-colors opacity-0 group-hover:opacity-100 disabled:opacity-40"
+                          className="cursor-pointer p-1.5 text-[var(--text-muted)] hover:text-rose-300 hover:bg-rose-500/10 rounded-md transition-colors opacity-0 group-hover:opacity-100 disabled:opacity-40"
                           title="Delete category and all its domains"
                         >
                           <Trash2 size={13} />
@@ -1864,30 +1905,6 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
         </Panel>
       </div>
 
-      {/* ── Manual blacklist with remove ────────────────────────────────── */}
-      <Panel>
-        <PanelHeader accent="neutral" title="Manual Blacklist" subtitle="Domains pinned as policy — click × to remove" />
-        <div className="p-5">
-          {manualBlacklist.length === 0 ? (
-            <p className="text-xs text-[var(--text-muted)] italic">No manual entries. Add domains above and select the <span className="font-mono text-[#c4b5fd]">manual</span> category.</p>
-          ) : (
-            <div className="flex flex-wrap gap-1.5">
-              {manualBlacklist.map((domain: string) => (
-                <span key={domain} className="flex items-center gap-1 px-2 py-0.5 bg-[var(--bg-card-alt)] border border-[var(--border-ui)] rounded text-[11px] font-mono text-[var(--text-main)]">
-                  {domain}
-                  <button
-                    onClick={() => removeDomain(domain)}
-                    disabled={removing === domain}
-                    className="ml-0.5 text-[var(--text-muted)] hover:text-rose-300 disabled:opacity-40 transition-colors"
-                  >
-                    <X size={11} />
-                  </button>
-                </span>
-              ))}
-            </div>
-          )}
-        </div>
-      </Panel>
     </div>
 
     {/* ── Domain drill-down modal ── */}
@@ -1994,6 +2011,116 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
               </button>
             </div>
           )}
+        </div>
+      </div>,
+      document.body
+    )}
+    {/* ── Category domains modal ── */}
+    {viewCat && createPortal(
+      <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
+        <div className="relative w-full sm:max-w-2xl h-[90dvh] sm:h-[85vh] bg-[var(--bg-card)] rounded-t-2xl sm:rounded-2xl border border-[var(--border-ui)] shadow-2xl flex flex-col animate-scale-in">
+          {/* Header */}
+          <div className="shrink-0 px-5 py-4 border-b border-[var(--border-ui)] bg-[var(--bg-card-alt)]/80 flex items-center gap-3">
+            <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#6a29e1]/50 to-transparent" />
+            <div className="flex-1 min-w-0">
+              <div className="flex flex-wrap items-center gap-2 mb-0.5">
+                <CategoryTag category={viewCat} />
+                <span className="text-[11px] text-[var(--text-muted)]">
+                  {viewCatLoading ? '…' : `${viewCatDomains.length} domain${viewCatDomains.length !== 1 ? 's' : ''}`}
+                </span>
+              </div>
+              <p className="text-[10px] text-[var(--text-muted)]">Blocked domains in this category</p>
+            </div>
+            <button
+              onClick={() => setViewCat(null)}
+              className="cursor-pointer shrink-0 p-1.5 rounded-md border border-[var(--border-ui)] bg-[var(--bg-card)] hover:bg-[var(--bg-card-alt)] transition-colors text-[var(--text-muted)] hover:text-[var(--text-main)]"
+            >
+              <X size={14} />
+            </button>
+          </div>
+
+          {/* Search bar */}
+          <div className="shrink-0 px-4 py-3 border-b border-[var(--border-ui)]">
+            <div className="relative">
+              <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] pointer-events-none" />
+              <input
+                autoFocus
+                type="text"
+                placeholder="Search or check a domain…"
+                value={viewCatSearch}
+                onChange={e => setViewCatSearch(e.target.value)}
+                className="w-full bg-[var(--bg-page)] border border-[var(--border-ui)] rounded-lg pl-9 pr-9 py-2 text-sm text-[var(--text-main)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[#6a29e1]/60 transition-colors font-mono"
+              />
+              {viewCatSearch && (
+                <button
+                  onClick={() => setViewCatSearch('')}
+                  className="cursor-pointer absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-main)]"
+                >
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+            {normalizedViewSearch && !viewCatLoading && (
+              exactViewMatch ? (
+                <p className="mt-2 text-[11px] text-emerald-300 flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+                  <span className="font-mono">{normalizedViewSearch}</span> is already in this category
+                </p>
+              ) : (
+                <p className="mt-2 text-[11px] text-amber-300 flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
+                  <span className="font-mono">{normalizedViewSearch}</span> is not in this category
+                </p>
+              )
+            )}
+          </div>
+
+          {/* Domain list */}
+          <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
+            {viewCatLoading ? (
+              <div className="p-6 space-y-2">
+                {[...Array(6)].map((_, i) => <div key={i} className="skeleton h-8 rounded" />)}
+              </div>
+            ) : filteredViewDomains.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full py-12 text-center px-6">
+                <ShieldCheck size={24} className="text-[var(--text-muted)] opacity-30 mb-3" />
+                <p className="text-sm text-[var(--text-muted)]">
+                  {normalizedViewSearch
+                    ? `No domains matching "${normalizedViewSearch}"`
+                    : 'No domains in this category yet.'}
+                </p>
+                {normalizedViewSearch && viewCatDomains.length > 0 && (
+                  <p className="text-xs text-[var(--text-muted)] mt-1">
+                    {viewCatDomains.length} domain{viewCatDomains.length !== 1 ? 's' : ''} total — none match your search
+                  </p>
+                )}
+              </div>
+            ) : (
+              <div className="divide-y divide-[var(--border-ui)]">
+                {filteredViewDomains.map((domain: string) => {
+                  const isExact = domain === normalizedViewSearch;
+                  return (
+                    <div
+                      key={domain}
+                      className={`flex items-center justify-between px-5 py-2.5 group transition-colors ${isExact ? 'bg-emerald-500/5' : 'hover:bg-[var(--bg-card-alt)]'}`}
+                    >
+                      <span className={`font-mono text-sm ${isExact ? 'text-emerald-300' : 'text-[var(--text-main)]'}`}>
+                        {domain}
+                      </span>
+                      <button
+                        onClick={() => removeDomainFromView(domain)}
+                        disabled={removing === domain}
+                        className="cursor-pointer opacity-0 group-hover:opacity-100 p-1 text-[var(--text-muted)] hover:text-rose-300 hover:bg-rose-500/10 rounded transition-all disabled:opacity-40"
+                        title="Remove from blocklist"
+                      >
+                        {removing === domain ? <span className="text-[10px] px-1">…</span> : <X size={13} />}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
       </div>,
       document.body
