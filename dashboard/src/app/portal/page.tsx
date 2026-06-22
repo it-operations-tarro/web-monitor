@@ -588,62 +588,69 @@ function PortalDashboard({ token, user, onLogout }: { token: string; user: any; 
               </span>
             </div>
 
-            {/* Agent cards grid */}
-            <div className="p-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-              {filteredAgents
-                .map((agent: any) => {
-                  const online = new Date().getTime() - new Date(agent.last_seen).getTime() < 120000;
-                  const heavy  = agent.current_bandwidth > 10 * 1024 * 1024;
-                  return (
-                    <div
-                      key={agent.machine_id}
-                      className="group relative bg-[var(--bg-card-alt)] border border-[var(--border-ui)] rounded-xl p-4 transition-all duration-200 hover:border-[#6a29e1]/40 hover:shadow-lg hover:shadow-black/20 overflow-hidden"
-                    >
-                      {/* Online indicator strip */}
-                      <div className={`absolute top-0 left-0 right-0 h-[2px] transition-all ${online ? 'bg-emerald-500' : 'bg-slate-700'}`} />
-
-                      {/* Header row */}
-                      <div className="flex items-start justify-between gap-2 mb-2.5">
-                        <div className="min-w-0 flex-1">
-                          <div className="text-xs font-semibold text-[#c4b5fd] truncate leading-tight">{agent.username || '—'}</div>
-                          <div className="font-mono text-[10px] text-[var(--text-muted)] mt-0.5">{agent.machine_id || '—'}</div>
-                        </div>
-                        <StatusPill tone={online ? 'success' : 'neutral'} label={online ? 'Online' : 'Offline'} pulse={online} />
-                      </div>
-
-                      {/* Stats row */}
-                      <div className="grid grid-cols-2 gap-2 mb-3">
-                        <div className="bg-[var(--bg-card)] rounded-lg px-3 py-2 text-center">
-                          <div className={`text-base font-bold tabular-nums ${heavy ? 'text-amber-300' : 'text-[var(--text-main)]'}`}>
-                            {formatBytes(agent.current_bandwidth)}<span className="text-[9px] text-[var(--text-muted)] ml-0.5">/min</span>
+            {/* Agent list table */}
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-[var(--bg-card-alt)] border-b border-[var(--border-ui)]">
+                    <th className={TH}>Status</th>
+                    <th className={TH}>Agent</th>
+                    <th className={TH}>Machine</th>
+                    <th className={TH}>IP</th>
+                    <th className={TH}>Bandwidth</th>
+                    <th className={TH}>Last Seen</th>
+                    <th className={`${TH} text-right`}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[var(--border-ui)]">
+                  {filteredAgents.map((agent: any) => {
+                    const online = new Date().getTime() - new Date(agent.last_seen).getTime() < 120000;
+                    const heavy  = agent.current_bandwidth > 10 * 1024 * 1024;
+                    return (
+                      <tr key={agent.machine_id} className="hover:bg-[var(--bg-card-alt)] transition-colors group">
+                        <td className={TD}>
+                          <StatusPill tone={online ? 'success' : 'neutral'} label={online ? 'Online' : 'Offline'} pulse={online} />
+                        </td>
+                        <td className={TD}>
+                          <span className="text-[#c4b5fd] font-mono text-xs">{agent.username || '—'}</span>
+                        </td>
+                        <td className={TD}>
+                          <span className="font-mono text-[var(--text-main)] text-xs">{agent.machine_id || '—'}</span>
+                        </td>
+                        <td className={TD}>
+                          <span className="text-[var(--text-muted)] font-mono text-xs">{agent.ip_address?.replace('::ffff:', '') || '—'}</span>
+                        </td>
+                        <td className={TD}>
+                          <span className={`tabular-nums font-medium text-sm ${heavy ? 'text-amber-300' : 'text-[var(--text-main)]'}`}>
+                            {formatBytes(agent.current_bandwidth)}/min
+                          </span>
+                        </td>
+                        <td className={`${TD} text-[var(--text-muted)] font-mono text-xs`}>
+                          {format(new Date(agent.last_seen), 'MMM dd, HH:mm:ss')}
+                        </td>
+                        <td className={`${TD} text-right`}>
+                          <div className="flex items-center justify-end opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                            <button
+                              onClick={() => openInspect(agent)}
+                              className="cursor-pointer flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold border border-[#6a29e1]/40 bg-[#6a29e1]/10 text-[#c4b5fd] hover:bg-[#6a29e1]/25 hover:border-[#6a29e1]/70 transition-all duration-150"
+                            >
+                              <Search size={11} />
+                              Inspect
+                            </button>
                           </div>
-                          <div className="text-[9px] text-[var(--text-muted)] uppercase tracking-widest font-semibold mt-0.5">Bandwidth</div>
-                        </div>
-                        <div className="bg-[var(--bg-card)] rounded-lg px-3 py-2 text-center">
-                          <div className="text-base font-bold tabular-nums text-[var(--text-main)]">
-                            {agent.ip_address?.replace('::ffff:', '') || '—'}
-                          </div>
-                          <div className="text-[9px] text-[var(--text-muted)] uppercase tracking-widest font-semibold mt-0.5">IP Address</div>
-                        </div>
-                      </div>
-
-                      {/* Last seen */}
-                      <div className="flex items-center gap-1.5 text-[10px] text-[var(--text-muted)] mb-3">
-                        <Clock size={9} className="shrink-0" />
-                        <span>Last seen {format(new Date(agent.last_seen), 'MMM dd, HH:mm:ss')}</span>
-                      </div>
-
-                      {/* Inspect button */}
-                      <button
-                        onClick={() => openInspect(agent)}
-                        className="cursor-pointer w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg border border-[#6a29e1]/40 bg-[#6a29e1]/10 text-[11px] font-semibold text-[#c4b5fd] hover:bg-[#6a29e1]/20 hover:border-[#6a29e1]/70 transition-all duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-[#6a29e1]/60"
-                      >
-                        <Search size={11} />
-                        Inspect Activity
-                      </button>
-                    </div>
-                  );
-                })}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {filteredAgents.length === 0 && (
+                    <tr>
+                      <td colSpan={7} className="px-4 py-10 text-center text-xs text-[var(--text-muted)] italic">
+                        {agentSearch || teamLeadFilter ? 'No agents match the current filters.' : 'No agents assigned yet.'}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
           </Panel>
         )}
