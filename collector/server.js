@@ -375,6 +375,22 @@ function writeConfig(config) {
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
 }
 
+// Get all domains for a specific category
+app.get('/api/enforcement/domains', (req, res) => {
+  const { category } = req.query;
+  if (!category) return res.status(400).json({ error: 'Missing category query param' });
+  try {
+    const config = readConfig();
+    const categoryMap = config.category_map || {};
+    const domains = Object.keys(categoryMap)
+      .filter(d => categoryMap[d] === category)
+      .sort();
+    res.json(domains);
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to read config' });
+  }
+});
+
 // Add one or more domains to a category
 app.post('/api/enforcement/domains', (req, res) => {
   const { domains, category } = req.body;
