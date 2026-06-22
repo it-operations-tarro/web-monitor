@@ -1531,10 +1531,14 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
   const [drillAgentHasMore, setDrillAgentHasMore]   = useState(false);
   const DRILL_PAGE = 15;
 
-  const [viewCat, setViewCat]               = useState<string | null>(null);
-  const [viewCatDomains, setViewCatDomains] = useState<string[]>([]);
-  const [viewCatLoading, setViewCatLoading] = useState(false);
-  const [viewCatSearch, setViewCatSearch]   = useState('');
+  const [viewCat, setViewCat]                     = useState<string | null>(null);
+  const [viewCatDomains, setViewCatDomains]       = useState<string[]>([]);
+  const [viewCatTotal, setViewCatTotal]           = useState(0);
+  const [viewCatPage, setViewCatPage]             = useState(0);
+  const [viewCatExactMatch, setViewCatExactMatch] = useState<boolean | null>(null);
+  const [viewCatLoading, setViewCatLoading]       = useState(false);
+  const [viewCatSearch, setViewCatSearch]         = useState('');
+  const VIEW_PAGE_SIZE = 100;
 
   useEffect(() => {
     if (!drillDomain) return;
@@ -1666,16 +1670,34 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
     } finally { setToggling(null); }
   };
 
-  const openViewCat = async (cat: string) => {
-    setViewCat(cat);
-    setViewCatSearch('');
-    setViewCatDomains([]);
+  const fetchViewCatPage = async (cat: string, search: string, page: number) => {
     setViewCatLoading(true);
+    const params = new URLSearchParams({
+      category: cat,
+      limit: String(VIEW_PAGE_SIZE),
+      offset: String(page * VIEW_PAGE_SIZE),
+      ...(search ? { search } : {}),
+    });
     try {
-      const res = await fetch(`${getBaseUrl()}/api/enforcement/domains?category=${encodeURIComponent(cat)}`, { cache: 'no-store' });
-      if (res.ok) setViewCatDomains(await res.json());
+      const res = await fetch(`${getBaseUrl()}/api/enforcement/domains?${params}`, { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        setViewCatDomains(data.domains ?? []);
+        setViewCatTotal(data.total ?? 0);
+        setViewCatExactMatch(data.exactMatch ?? null);
+      }
     } catch {}
     setViewCatLoading(false);
+  };
+
+  const openViewCat = (cat: string) => {
+    setViewCat(cat);
+    setViewCatSearch('');
+    setViewCatPage(0);
+    setViewCatDomains([]);
+    setViewCatTotal(0);
+    setViewCatExactMatch(null);
+    fetchViewCatPage(cat, '', 0);
   };
 
   const removeDomainFromView = async (domain: string) => {
@@ -1683,16 +1705,15 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
     try {
       await fetch(`${getBaseUrl()}/api/enforcement/domains/${encodeURIComponent(domain)}`, { method: 'DELETE' });
       setViewCatDomains(prev => prev.filter(d => d !== domain));
+      setViewCatTotal(prev => Math.max(0, prev - 1));
       onRefresh();
     } finally { setRemoving(null); }
   };
 
   const normalizedViewSearch = viewCatSearch.trim().toLowerCase()
     .replace(/^https?:\/\//, '').replace(/\/.*$/, '');
-  const filteredViewDomains = normalizedViewSearch
-    ? viewCatDomains.filter(d => d.includes(normalizedViewSearch))
-    : viewCatDomains;
-  const exactViewMatch = normalizedViewSearch ? viewCatDomains.includes(normalizedViewSearch) : false;
+
+  const viewCatTotalPages = Math.max(1, Math.ceil(viewCatTotal / VIEW_PAGE_SIZE));
 
   return (
     <>
@@ -2026,7 +2047,7 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
               <div className="flex flex-wrap items-center gap-2 mb-0.5">
                 <CategoryTag category={viewCat} />
                 <span className="text-[11px] text-[var(--text-muted)]">
-                  {viewCatLoading ? '…' : `${viewCatDomains.length} domain${viewCatDomains.length !== 1 ? 's' : ''}`}
+                  {viewCatLoading ? '…' : `${viewCatTotal.toLocaleString()} domain${viewCatTotal !== 1 ? 's' : ''}`}
                 </span>
               </div>
               <p className="text-[10px] text-[var(--text-muted)]">Blocked domains in this category</p>
@@ -2048,20 +2069,29 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
                 type="text"
                 placeholder="Search or check a domain…"
                 value={viewCatSearch}
-                onChange={e => setViewCatSearch(e.target.value)}
+                onChange={e => {
+                  const val = e.target.value;
+                  setViewCatSearch(val);
+                  setViewCatPage(0);
+                  fetchViewCatPage(viewCat!, val, 0);
+                }}
                 className="w-full bg-[var(--bg-page)] border border-[var(--border-ui)] rounded-lg pl-9 pr-9 py-2 text-sm text-[var(--text-main)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[#6a29e1]/60 transition-colors font-mono"
               />
               {viewCatSearch && (
                 <button
-                  onClick={() => setViewCatSearch('')}
+                  onClick={() => {
+                    setViewCatSearch('');
+                    setViewCatPage(0);
+                    fetchViewCatPage(viewCat!, '', 0);
+                  }}
                   className="cursor-pointer absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-main)]"
                 >
                   <X size={12} />
                 </button>
               )}
             </div>
-            {normalizedViewSearch && !viewCatLoading && (
-              exactViewMatch ? (
+            {normalizedViewSearch && !viewCatLoading && viewCatExactMatch !== null && (
+              viewCatExactMatch ? (
                 <p className="mt-2 text-[11px] text-emerald-300 flex items-center gap-1.5">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
                   <span className="font-mono">{normalizedViewSearch}</span> is already in this category
@@ -2079,9 +2109,9 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
           <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
             {viewCatLoading ? (
               <div className="p-6 space-y-2">
-                {[...Array(6)].map((_, i) => <div key={i} className="skeleton h-8 rounded" />)}
+                {[...Array(8)].map((_, i) => <div key={i} className="skeleton h-8 rounded" />)}
               </div>
-            ) : filteredViewDomains.length === 0 ? (
+            ) : viewCatDomains.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full py-12 text-center px-6">
                 <ShieldCheck size={24} className="text-[var(--text-muted)] opacity-30 mb-3" />
                 <p className="text-sm text-[var(--text-muted)]">
@@ -2089,15 +2119,10 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
                     ? `No domains matching "${normalizedViewSearch}"`
                     : 'No domains in this category yet.'}
                 </p>
-                {normalizedViewSearch && viewCatDomains.length > 0 && (
-                  <p className="text-xs text-[var(--text-muted)] mt-1">
-                    {viewCatDomains.length} domain{viewCatDomains.length !== 1 ? 's' : ''} total — none match your search
-                  </p>
-                )}
               </div>
             ) : (
               <div className="divide-y divide-[var(--border-ui)]">
-                {filteredViewDomains.map((domain: string) => {
+                {viewCatDomains.map((domain: string) => {
                   const isExact = domain === normalizedViewSearch;
                   return (
                     <div
@@ -2121,6 +2146,37 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
               </div>
             )}
           </div>
+
+          {/* Pagination footer */}
+          {!viewCatLoading && viewCatTotal > VIEW_PAGE_SIZE && (
+            <div className="shrink-0 px-4 py-3 border-t border-[var(--border-ui)] flex items-center justify-between gap-3">
+              <button
+                onClick={() => {
+                  const p = Math.max(0, viewCatPage - 1);
+                  setViewCatPage(p);
+                  fetchViewCatPage(viewCat!, viewCatSearch, p);
+                }}
+                disabled={viewCatPage === 0}
+                className="cursor-pointer flex items-center gap-1 px-3 py-1.5 rounded-lg border border-[var(--border-ui)] bg-[var(--bg-card-alt)] text-xs font-medium text-[var(--text-muted)] hover:text-[var(--text-main)] hover:border-[#6a29e1]/40 disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-150"
+              >
+                <ChevronLeft size={13} /> Previous
+              </button>
+              <span className="text-[11px] text-[var(--text-muted)] tabular-nums">
+                {viewCatPage * VIEW_PAGE_SIZE + 1}–{Math.min((viewCatPage + 1) * VIEW_PAGE_SIZE, viewCatTotal).toLocaleString()} of {viewCatTotal.toLocaleString()}
+              </span>
+              <button
+                onClick={() => {
+                  const p = Math.min(viewCatTotalPages - 1, viewCatPage + 1);
+                  setViewCatPage(p);
+                  fetchViewCatPage(viewCat!, viewCatSearch, p);
+                }}
+                disabled={viewCatPage >= viewCatTotalPages - 1}
+                className="cursor-pointer flex items-center gap-1 px-3 py-1.5 rounded-lg border border-[var(--border-ui)] bg-[var(--bg-card-alt)] text-xs font-medium text-[var(--text-muted)] hover:text-[var(--text-main)] hover:border-[#6a29e1]/40 disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-150"
+              >
+                Next <ChevronRight size={13} />
+              </button>
+            </div>
+          )}
         </div>
       </div>,
       document.body
