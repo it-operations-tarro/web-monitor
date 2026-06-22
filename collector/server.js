@@ -410,21 +410,22 @@ app.post('/api/enforcement/domains', (req, res) => {
     .filter(Boolean);
   try {
     const config = readConfig();
-    config.category_map = config.category_map || {};
-    config.blacklist = config.blacklist || [];
-    config.manual_blacklist = config.manual_blacklist || [];
+    config.category_map     = config.category_map     || {};
+    config.blacklist        = config.blacklist         || [];
+    config.manual_blacklist = config.manual_blacklist  || [];
     config.user_category_map = config.user_category_map || {};
+
+    const duplicates = list.filter(d => config.category_map[d] === category);
+    const added      = list.filter(d => config.category_map[d] !== category);
+
     for (const domain of list) {
-      config.category_map[domain] = category;
+      config.category_map[domain]      = category;
       config.user_category_map[domain] = category;
       if (!config.blacklist.includes(domain)) config.blacklist.push(domain);
-      // Ensure user-added domains survive the periodic sync rebuild.
-      if (!config.manual_blacklist.includes(domain)) {
-        config.manual_blacklist.push(domain);
-      }
+      if (!config.manual_blacklist.includes(domain)) config.manual_blacklist.push(domain);
     }
     writeConfig(config);
-    res.json({ status: 'added', count: list.length });
+    res.json({ status: 'ok', added: added.length, duplicates });
   } catch (e) {
     res.status(500).json({ error: 'Failed to update config' });
   }

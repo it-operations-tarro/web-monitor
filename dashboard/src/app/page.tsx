@@ -1510,6 +1510,7 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
   const [domainCategory, setDomainCategory] = useState('manual');
   const [domainSaving, setDomainSaving] = useState(false);
   const [domainError, setDomainError] = useState('');
+  const [domainResult, setDomainResult] = useState<{ added: number; duplicates: string[] } | null>(null);
   const [newCatName, setNewCatName] = useState('');
   const [catSaving, setCatSaving] = useState(false);
   const [catError, setCatError] = useState('');
@@ -1615,6 +1616,7 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
 
   const addDomains = async () => {
     setDomainError('');
+    setDomainResult(null);
     if (!parsedDomains.length) { setDomainError('Enter at least one domain.'); return; }
     setDomainSaving(true);
     try {
@@ -1623,8 +1625,15 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ domains: parsedDomains, category: domainCategory }),
       });
-      if (res.ok) { setDomainRaw(''); onRefresh(); }
-      else { const d = await res.json().catch(() => ({})); setDomainError(d.error || `Error ${res.status}`); }
+      if (res.ok) {
+        const d = await res.json();
+        setDomainRaw('');
+        setDomainResult({ added: d.added ?? 0, duplicates: d.duplicates ?? [] });
+        onRefresh();
+      } else {
+        const d = await res.json().catch(() => ({}));
+        setDomainError(d.error || `Error ${res.status}`);
+      }
     } catch { setDomainError('Could not reach collector.'); }
     finally { setDomainSaving(false); }
   };
@@ -1732,7 +1741,7 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
                 className="w-full bg-[var(--bg-card-alt)] border border-[var(--border-ui)] rounded-md px-3 py-2 text-sm text-[var(--text-main)] placeholder-[var(--text-muted)] font-mono focus:outline-none focus:border-[#6a29e1]/60 resize-none"
                 placeholder={"tiktok.com\nfacebook.com\nhttps://instagram.com/"}
                 value={domainRaw}
-                onChange={e => setDomainRaw(e.target.value)}
+                onChange={e => { setDomainRaw(e.target.value); setDomainResult(null); }}
               />
             </div>
             <div className="flex flex-col gap-2">
@@ -1757,6 +1766,29 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
             </div>
           </div>
           {domainError && <p className="text-xs text-rose-300">{domainError}</p>}
+          {domainResult && (
+            <div className="space-y-1.5">
+              {domainResult.added > 0 && (
+                <p className="flex items-center gap-2 text-xs text-emerald-300">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+                  {domainResult.added} domain{domainResult.added !== 1 ? 's' : ''} added to <span className="font-mono text-[#c4b5fd]">{domainCategory}</span>.
+                </p>
+              )}
+              {domainResult.duplicates.length > 0 && (
+                <div>
+                  <p className="flex items-center gap-2 text-xs text-amber-300 mb-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
+                    {domainResult.duplicates.length} domain{domainResult.duplicates.length !== 1 ? 's were' : ' was'} already in <span className="font-mono text-[#c4b5fd]">{domainCategory}</span>:
+                  </p>
+                  <div className="flex flex-wrap gap-1">
+                    {domainResult.duplicates.map(d => (
+                      <span key={d} className="px-2 py-0.5 bg-amber-500/10 border border-amber-500/30 rounded text-[11px] font-mono text-amber-300">{d}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
           {parsedDomains.length > 0 && (
             <div className="flex flex-wrap gap-1.5">
               {parsedDomains.map(d => (
