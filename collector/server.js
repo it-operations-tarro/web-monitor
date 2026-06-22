@@ -388,8 +388,6 @@ app.get('/api/enforcement/domains', (req, res) => {
 
     let all = Object.keys(categoryMap).filter(d => categoryMap[d] === category);
 
-    const exactMatch = normalized ? all.includes(normalized) : null;
-
     if (normalized) all = all.filter(d => d.includes(normalized));
     all.sort();
 
@@ -397,7 +395,7 @@ app.get('/api/enforcement/domains', (req, res) => {
     const lim   = Math.min(Math.max(parseInt(limit)  || 100, 1), 500);
     const off   = Math.max(parseInt(offset) || 0, 0);
 
-    res.json({ domains: all.slice(off, off + lim), total, exactMatch });
+    res.json({ domains: all.slice(off, off + lim), total });
   } catch (e) {
     res.status(500).json({ error: 'Failed to read config' });
   }

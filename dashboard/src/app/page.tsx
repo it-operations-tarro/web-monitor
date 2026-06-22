@@ -1535,7 +1535,6 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
   const [viewCatDomains, setViewCatDomains]       = useState<string[]>([]);
   const [viewCatTotal, setViewCatTotal]           = useState(0);
   const [viewCatPage, setViewCatPage]             = useState(0);
-  const [viewCatExactMatch, setViewCatExactMatch] = useState<boolean | null>(null);
   const [viewCatLoading, setViewCatLoading]       = useState(false);
   const [viewCatSearch, setViewCatSearch]         = useState('');
   const VIEW_PAGE_SIZE = 100;
@@ -1684,7 +1683,6 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
         const data = await res.json();
         setViewCatDomains(data.domains ?? []);
         setViewCatTotal(data.total ?? 0);
-        setViewCatExactMatch(data.exactMatch ?? null);
       }
     } catch {}
     setViewCatLoading(false);
@@ -1696,7 +1694,6 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
     setViewCatPage(0);
     setViewCatDomains([]);
     setViewCatTotal(0);
-    setViewCatExactMatch(null);
     fetchViewCatPage(cat, '', 0);
   };
 
@@ -2090,18 +2087,12 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
                 </button>
               )}
             </div>
-            {normalizedViewSearch && !viewCatLoading && viewCatExactMatch !== null && (
-              viewCatExactMatch ? (
-                <p className="mt-2 text-[11px] text-emerald-300 flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
-                  <span className="font-mono">{normalizedViewSearch}</span> is already in this category
-                </p>
-              ) : (
-                <p className="mt-2 text-[11px] text-amber-300 flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
-                  <span className="font-mono">{normalizedViewSearch}</span> is not in this category
-                </p>
-              )
+            {normalizedViewSearch && !viewCatLoading && (
+              <p className="mt-2 text-[11px] text-[var(--text-muted)] flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#6a29e1]/60 shrink-0" />
+                {viewCatTotal.toLocaleString()} domain{viewCatTotal !== 1 ? 's' : ''} containing{' '}
+                <span className="font-mono text-[#c4b5fd]">"{normalizedViewSearch}"</span>
+              </p>
             )}
           </div>
 
