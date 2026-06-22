@@ -727,6 +727,10 @@ function PortalDashboard({ token, user, onLogout }: { token: string; user: any; 
                   <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-[var(--text-muted)] font-mono mt-0.5">
                     {inspectAgent.machine_id && <span>{inspectAgent.machine_id}</span>}
                     {inspectAgent.ip_address && <span>{inspectAgent.ip_address.replace('::ffff:', '')}</span>}
+                    {(() => {
+                      const tl = teamLeads.find((t: any) => t.id === inspectAgent.team_lead_id);
+                      return tl ? <span>TL · <span className="text-[#c4b5fd]">{tl.name || tl.username}</span></span> : null;
+                    })()}
                   </div>
                 </div>
                 <button

@@ -1256,6 +1256,10 @@ function MachineStatusView({
                 <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-[var(--text-muted)] font-mono">
                   <span>{inspectMachine.machine_id}</span>
                   {inspectMachine.ip_address && <span>{inspectMachine.ip_address.replace('::ffff:', '')}</span>}
+                  {(() => {
+                    const tl = teamLeads.find(t => t.agents?.includes(inspectMachine.username));
+                    return tl ? <span>TL · <span className="text-[#c4b5fd]">{tl.name}</span></span> : null;
+                  })()}
                 </div>
               </div>
               <button
