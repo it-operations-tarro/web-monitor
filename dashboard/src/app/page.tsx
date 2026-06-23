@@ -1883,16 +1883,21 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
                           {busy ? '…' : isOn ? 'Disable' : 'Enable'}
                         </button>
                       )}
-                      {!isBuiltin && (
-                        <button
-                          onClick={() => deleteCategory(cat)}
-                          disabled={busy}
-                          className="cursor-pointer p-1.5 text-[var(--text-muted)] hover:text-rose-300 hover:bg-rose-500/10 rounded-md transition-colors opacity-0 group-hover:opacity-100 disabled:opacity-40"
-                          title="Delete category and all its domains"
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      )}
+                      <button
+                        onClick={() => {
+                          if (isBuiltin) {
+                            setCatError('Built-in categories cannot be deleted.');
+                            setTimeout(() => setCatError(''), 3000);
+                            return;
+                          }
+                          deleteCategory(cat);
+                        }}
+                        disabled={busy}
+                        className="cursor-pointer p-1.5 text-[var(--text-muted)] hover:text-rose-300 hover:bg-rose-500/10 rounded-md transition-colors opacity-0 group-hover:opacity-100 disabled:opacity-40"
+                        title={isBuiltin ? 'Built-in categories cannot be deleted' : 'Delete category and all its domains'}
+                      >
+                        <Trash2 size={13} />
+                      </button>
                     </div>
                   </td>
                 </tr>
