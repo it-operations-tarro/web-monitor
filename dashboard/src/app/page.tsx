@@ -881,6 +881,7 @@ function MachineStatusView({
   const [inspectHasMore, setInspectHasMore]       = useState(true);
   const [inspectLogsLoading, setInspectLogsLoading] = useState(false);
   const [inspectDate, setInspectDate]             = useState<string>(todayStr());
+  const [urlTooltip, setUrlTooltip]               = useState<{ url: string; x: number; y: number } | null>(null);
   const LOG_PAGE_SIZE = 15;
 
   /* ── Load team leads on mount ── */
@@ -1443,11 +1444,16 @@ function MachineStatusView({
                           ) : (
                             inspectLogs.map((log: any) => (
                               <tr key={log.id} className={`transition-colors ${log.violation ? 'hover:bg-rose-500/5 border-l-2 border-rose-500/40' : 'hover:bg-[var(--bg-card)]/40 border-l-2 border-transparent'}`}>
-                                <td className={TD}>
+                                <td className={`${TD} cursor-default`}
+                                  onMouseEnter={e => {
+                                    if (log.full_url) {
+                                      const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                                      setUrlTooltip({ url: log.full_url, x: r.left, y: r.bottom + 6 });
+                                    }
+                                  }}
+                                  onMouseLeave={() => setUrlTooltip(null)}
+                                >
                                   <span className={`font-medium text-sm truncate max-w-[180px] block ${log.violation ? 'text-rose-300' : 'text-[var(--text-main)]'}`}>{log.domain}</span>
-                                  {log.full_url && (
-                                    <span className="text-[10px] text-[var(--text-muted)] font-mono truncate max-w-[220px] block" title={log.full_url}>{log.full_url}</span>
-                                  )}
                                 </td>
                                 <td className={TD}>
                                   {log.violation ? <CategoryTag category={log.category} /> : <span className="text-[var(--text-muted)] text-xs">—</span>}
@@ -2203,6 +2209,20 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
               </button>
             </div>
           )}
+        </div>
+      </div>,
+      document.body
+    )}
+
+    {/* ── URL tooltip — portal so it escapes overflow-hidden containers ── */}
+    {urlTooltip && createPortal(
+      <div
+        className="fixed z-[9999] pointer-events-none"
+        style={{ left: urlTooltip.x, top: urlTooltip.y }}
+      >
+        <div className="bg-[var(--bg-card)] border border-[var(--border-ui)] rounded-lg px-3 py-2.5 shadow-2xl max-w-[440px] min-w-[200px]">
+          <p className="text-[9px] font-semibold text-[var(--text-muted)] uppercase tracking-widest mb-1.5">Full URL</p>
+          <p className="text-[11px] text-[var(--text-main)] font-mono break-all leading-relaxed">{urlTooltip.url}</p>
         </div>
       </div>,
       document.body
