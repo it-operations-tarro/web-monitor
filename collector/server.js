@@ -54,7 +54,8 @@ function sendSlackViolationNotification({ username, machine_id, domain, full_url
   const text = `:warning: *Violation detected*\n` +
     `*Agent:* ${username || '(unknown)'}\n` +
     `*Machine:* ${machine_id}\n` +
-    `*Site:* ${domain}${full_url ? ` (<${full_url}|open>)` : ''}\n` +
+    `*Site:* ${domain}\n` +
+    `*URL:* ${full_url ? `<${full_url}|${full_url}>` : domain}\n` +
     `*Category:* ${category || 'unknown'}\n` +
     `*Time:* ${timestamp}`;
 
