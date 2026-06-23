@@ -226,7 +226,8 @@ app.post('/logs', (req, res) => {
     try {
       const configPath = path.join(__dirname, 'config.json');
       const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-      category = config.category_map?.[domain] || 'manual';
+      const normalizedUrl = (full_url || '').toLowerCase().replace(/^https?:\/\//, '').split('?')[0].split('#')[0].replace(/\/$/, '');
+      category = config.category_map?.[domain] || config.category_map?.[normalizedUrl] || 'manual';
     } catch (e) {
       category = 'manual';
     }
@@ -407,7 +408,7 @@ app.post('/api/enforcement/domains', (req, res) => {
   const { domains, category } = req.body;
   if (!domains || !category) return res.status(400).json({ error: 'Missing domains or category' });
   const list = (Array.isArray(domains) ? domains : [domains])
-    .map(d => d.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, ''))
+    .map(d => d.trim().toLowerCase().replace(/^https?:\/\//, '').split('?')[0].split('#')[0].replace(/\/$/, ''))
     .filter(Boolean);
   try {
     const config = readConfig();
