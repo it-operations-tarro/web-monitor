@@ -1445,6 +1445,9 @@ function MachineStatusView({
                               <tr key={log.id} className={`transition-colors ${log.violation ? 'hover:bg-rose-500/5 border-l-2 border-rose-500/40' : 'hover:bg-[var(--bg-card)]/40 border-l-2 border-transparent'}`}>
                                 <td className={TD}>
                                   <span className={`font-medium text-sm truncate max-w-[180px] block ${log.violation ? 'text-rose-300' : 'text-[var(--text-main)]'}`}>{log.domain}</span>
+                                  {log.full_url && (
+                                    <span className="text-[10px] text-[var(--text-muted)] font-mono truncate max-w-[220px] block" title={log.full_url}>{log.full_url}</span>
+                                  )}
                                 </td>
                                 <td className={TD}>
                                   {log.violation ? <CategoryTag category={log.category} /> : <span className="text-[var(--text-muted)] text-xs">—</span>}
