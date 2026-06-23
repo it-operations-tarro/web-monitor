@@ -1507,6 +1507,20 @@ function MachineStatusView({
         </div>,
         document.body
       )}
+
+      {/* ── URL tooltip — portal so it escapes overflow-hidden containers ── */}
+      {urlTooltip && createPortal(
+        <div
+          className="fixed z-[9999] pointer-events-none"
+          style={{ left: urlTooltip.x, top: urlTooltip.y }}
+        >
+          <div className="bg-[var(--bg-card)] border border-[var(--border-ui)] rounded-lg px-3 py-2.5 shadow-2xl max-w-[440px] min-w-[200px]">
+            <p className="text-[9px] font-semibold text-[var(--text-muted)] uppercase tracking-widest mb-1.5">Full URL</p>
+            <p className="text-[11px] text-[var(--text-main)] font-mono break-all leading-relaxed">{urlTooltip.url}</p>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }
@@ -2214,19 +2228,6 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
       document.body
     )}
 
-    {/* ── URL tooltip — portal so it escapes overflow-hidden containers ── */}
-    {urlTooltip && createPortal(
-      <div
-        className="fixed z-[9999] pointer-events-none"
-        style={{ left: urlTooltip.x, top: urlTooltip.y }}
-      >
-        <div className="bg-[var(--bg-card)] border border-[var(--border-ui)] rounded-lg px-3 py-2.5 shadow-2xl max-w-[440px] min-w-[200px]">
-          <p className="text-[9px] font-semibold text-[var(--text-muted)] uppercase tracking-widest mb-1.5">Full URL</p>
-          <p className="text-[11px] text-[var(--text-main)] font-mono break-all leading-relaxed">{urlTooltip.url}</p>
-        </div>
-      </div>,
-      document.body
-    )}
     </>
   );
 }
