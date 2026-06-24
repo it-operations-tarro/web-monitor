@@ -1634,7 +1634,7 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
 
   const parsedDomains = domainRaw
     .split(/[\n,;]+/)
-    .map(d => d.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, ''))
+    .map(d => d.trim().toLowerCase().replace(/^https?:\/\//, '').split('?')[0].split('#')[0].replace(/\/$/, ''))
     .filter(Boolean);
 
   const addDomains = async () => {
@@ -1664,7 +1664,7 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
   const removeDomain = async (domain: string) => {
     setRemoving(domain);
     try {
-      await fetch(`${getBaseUrl()}/api/enforcement/domains/${encodeURIComponent(domain)}`, { method: 'DELETE' });
+      await fetch(`${getBaseUrl()}/api/enforcement/domains?domain=${encodeURIComponent(domain)}`, { method: 'DELETE' });
       onRefresh();
     } finally { setRemoving(null); }
   };
@@ -1732,7 +1732,7 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
   const removeDomainFromView = async (domain: string) => {
     setRemoving(domain);
     try {
-      await fetch(`${getBaseUrl()}/api/enforcement/domains/${encodeURIComponent(domain)}`, { method: 'DELETE' });
+      await fetch(`${getBaseUrl()}/api/enforcement/domains?domain=${encodeURIComponent(domain)}`, { method: 'DELETE' });
       setViewCatDomains(prev => prev.filter(d => d !== domain));
       setViewCatTotal(prev => Math.max(0, prev - 1));
       onRefresh();

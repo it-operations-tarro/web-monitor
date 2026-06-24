@@ -433,7 +433,25 @@ app.post('/api/enforcement/domains', (req, res) => {
   }
 });
 
-// Remove a domain from the blacklist entirely
+// Remove a domain (or path-specific entry) from the blacklist entirely.
+// Uses a query param so keys containing "/" aren't mangled by path routing/proxies.
+app.delete('/api/enforcement/domains', (req, res) => {
+  const domain = (req.query.domain || '').toString();
+  if (!domain) return res.status(400).json({ error: 'Missing domain query param' });
+  try {
+    const config = readConfig();
+    config.blacklist = (config.blacklist || []).filter(d => d !== domain);
+    config.manual_blacklist = (config.manual_blacklist || []).filter(d => d !== domain);
+    delete (config.category_map || {})[domain];
+    delete (config.user_category_map || {})[domain];
+    writeConfig(config);
+    res.json({ status: 'removed' });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to update config' });
+  }
+});
+
+// Legacy path-param variant (kept for backwards compat)
 app.delete('/api/enforcement/domains/:domain', (req, res) => {
   const domain = decodeURIComponent(req.params.domain);
   try {
