@@ -35,7 +35,7 @@ set -euo pipefail
 # ==============================================================================
 
 EXTENSION_ID="depibabflipmjimimdboikfhgdelcdnp"
-EXTENSION_VERSION="1.1.1"
+EXTENSION_VERSION="1.1.4"
 CRX_FILE="/opt/chrome-extensions/extension.crx"
 
 # Path where the CRX and manifest will live permanently

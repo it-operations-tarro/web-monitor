@@ -55,6 +55,13 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   }
 });
 
+// Capture the email the moment the profile's sign-in state changes.
+// This covers newly-created profiles that sign in after the extension has
+// already installed (when onInstalled ran, the profile had no account yet).
+if (chrome.identity.onSignInChanged) {
+  chrome.identity.onSignInChanged.addListener(() => captureIdentity());
+}
+
 // Message listener for force sync from popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'forceSync') {
@@ -80,8 +87,15 @@ async function syncConfig() {
 }
 
 async function sendHeartbeat() {
-  const settings = await Storage.getSettings();
-  
+  let settings = await Storage.getSettings();
+
+  // Safety net: if we still don't have a real email (e.g. the profile signed in
+  // after install and the sign-in event was missed), retry capture before sending.
+  if (!settings.username || settings.username === 'unknown_agent') {
+    await captureIdentity();
+    settings = await Storage.getSettings();
+  }
+
   // Capture and reset bandwidth tracker
   const bandwidthToSend = currentBandwidthBytes;
   currentBandwidthBytes = 0;
@@ -90,7 +104,8 @@ async function sendHeartbeat() {
     machine_id: settings.machineId,
     username: settings.username,
     timestamp: new Date().toISOString(),
-    bandwidth: bandwidthToSend
+    bandwidth: bandwidthToSend,
+    extension_version: chrome.runtime.getManifest().version
   });
 }
 

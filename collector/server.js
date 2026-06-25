@@ -140,9 +140,12 @@ db.serialize(() => {
       last_seen DATETIME,
       ip_address TEXT,
       current_bandwidth INTEGER DEFAULT 0,
-      total_bandwidth INTEGER DEFAULT 0
+      total_bandwidth INTEGER DEFAULT 0,
+      extension_version TEXT
     )
   `);
+  // Add column for DBs created before extension-version tracking existed
+  db.run("ALTER TABLE machines ADD COLUMN extension_version TEXT", () => {});
 
   db.run(`
     CREATE TABLE IF NOT EXISTS bandwidth_violations (
@@ -255,22 +258,24 @@ app.post('/logs', (req, res) => {
  * Endpoint for heartbeat/ping
  */
 app.post('/ping', (req, res) => {
-  const { machine_id, username, timestamp, bandwidth } = req.body;
+  const { machine_id, username, timestamp, bandwidth, extension_version } = req.body;
   const ip = req.ip;
   const currentBandwidth = bandwidth || 0;
+  const extVersion = extension_version || null;
 
   if (!machine_id) return res.status(400).send();
 
   db.run(`
-    INSERT INTO machines (machine_id, username, last_seen, ip_address, current_bandwidth, total_bandwidth)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO machines (machine_id, username, last_seen, ip_address, current_bandwidth, total_bandwidth, extension_version)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(machine_id) DO UPDATE SET
       username = excluded.username,
       last_seen = excluded.last_seen,
       ip_address = excluded.ip_address,
       current_bandwidth = excluded.current_bandwidth,
-      total_bandwidth = machines.total_bandwidth + excluded.current_bandwidth
-  `, [machine_id, username, timestamp, ip, currentBandwidth, currentBandwidth], (err) => {
+      total_bandwidth = machines.total_bandwidth + excluded.current_bandwidth,
+      extension_version = COALESCE(excluded.extension_version, machines.extension_version)
+  `, [machine_id, username, timestamp, ip, currentBandwidth, currentBandwidth, extVersion], (err) => {
     if (err) return res.status(500).send();
     
     // Log violation history if threshold exceeded (10MB/min)
@@ -420,14 +425,45 @@ app.post('/api/enforcement/domains', (req, res) => {
     const duplicates = list.filter(d => config.category_map[d] === category);
     const added      = list.filter(d => config.category_map[d] !== category);
 
+    // Detect pre-existing bare-host blocks that a new path-specific entry should
+    // supersede. A bare host (e.g. "example.com") blocks the whole domain via
+    // exactSet, which would override a path-specific entry ("example.com/foo").
+    // We compute this BEFORE adding so a host added as bare in the same batch
+    // is respected (not auto-removed).
+    const hasBareEntry = (host) =>
+      config.blacklist.includes(host) ||
+      config.manual_blacklist.includes(host) ||
+      Object.prototype.hasOwnProperty.call(config.category_map, host) ||
+      Object.prototype.hasOwnProperty.call(config.user_category_map, host);
+
+    const superseded = [];
+    for (const entry of list) {
+      if (entry.includes('/')) {
+        const host = entry.split('/')[0];
+        if (host && hasBareEntry(host) && !list.includes(host) && !superseded.includes(host)) {
+          superseded.push(host);
+        }
+      }
+    }
+
     for (const domain of list) {
       config.category_map[domain]      = category;
       config.user_category_map[domain] = category;
       if (!config.blacklist.includes(domain)) config.blacklist.push(domain);
       if (!config.manual_blacklist.includes(domain)) config.manual_blacklist.push(domain);
     }
+
+    // Remove the superseded bare-host blocks from all four lists so only the
+    // path-specific entry remains in effect.
+    for (const host of superseded) {
+      config.blacklist        = config.blacklist.filter(d => d !== host);
+      config.manual_blacklist = config.manual_blacklist.filter(d => d !== host);
+      delete config.category_map[host];
+      delete config.user_category_map[host];
+    }
+
     writeConfig(config);
-    res.json({ status: 'ok', added: added.length, duplicates });
+    res.json({ status: 'ok', added: added.length, duplicates, superseded });
   } catch (e) {
     res.status(500).json({ error: 'Failed to update config' });
   }

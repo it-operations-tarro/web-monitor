@@ -848,6 +848,10 @@ function OverviewTab({
 // ─── fleet tab ────────────────────────────────────────────────────────────
 const PAGE_SIZE = 15;
 
+// Latest extension version agents should be running. Bump this on every release
+// so the fleet table flags machines still on an older build.
+const LATEST_EXTENSION_VERSION = '1.1.4';
+
 function MachineStatusView({
   machines,
   onDelete,
@@ -1111,6 +1115,7 @@ function MachineStatusView({
                 <th className={TH}>Agent</th>
                 <th className={TH}>IP</th>
                 <th className={TH}>Bandwidth</th>
+                <th className={TH}>Extension</th>
                 <th className={TH}>Last Activity</th>
                 <th className={`${TH} text-right`}>Actions</th>
               </tr>
@@ -1138,6 +1143,15 @@ function MachineStatusView({
                       <span className={`tabular-nums font-medium text-sm ${heavy ? 'text-amber-300' : 'text-[var(--text-main)]'}`}>
                         {formatBytes(m.current_bandwidth)}/min
                       </span>
+                    </td>
+                    <td className={TD}>
+                      {!m.extension_version ? (
+                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded border border-amber-500/30 bg-amber-500/10 text-amber-300" title="No version reported yet — old extension or hasn't pinged since the update">Unknown</span>
+                      ) : m.extension_version === LATEST_EXTENSION_VERSION ? (
+                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded border border-emerald-500/30 bg-emerald-500/10 text-emerald-300">v{m.extension_version}</span>
+                      ) : (
+                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded border border-rose-500/30 bg-rose-500/10 text-rose-300" title={`Outdated — latest is v${LATEST_EXTENSION_VERSION}`}>v{m.extension_version} · outdated</span>
+                      )}
                     </td>
                     <td className={`${TD} text-[var(--text-muted)] font-mono text-xs`}>
                       {fmtEST(m.last_seen)}
@@ -1168,7 +1182,7 @@ function MachineStatusView({
               })}
               {paginated.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-10 text-center text-xs text-[var(--text-muted)] italic">
+                  <td colSpan={8} className="px-4 py-10 text-center text-xs text-[var(--text-muted)] italic">
                     {fleetSearch || selectedTL
                       ? 'No workstations match the current filters.'
                       : 'No workstations detected yet. Ensure extensions are active.'}
@@ -1533,7 +1547,7 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
   const [domainCategory, setDomainCategory] = useState('manual');
   const [domainSaving, setDomainSaving] = useState(false);
   const [domainError, setDomainError] = useState('');
-  const [domainResult, setDomainResult] = useState<{ added: number; duplicates: string[] } | null>(null);
+  const [domainResult, setDomainResult] = useState<{ added: number; duplicates: string[]; superseded?: string[] } | null>(null);
   const [newCatName, setNewCatName] = useState('');
   const [catSaving, setCatSaving] = useState(false);
   const [catError, setCatError] = useState('');
@@ -1632,10 +1646,12 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
   const allCategories = [...BUILTIN_CATEGORIES, ...customCategories];
   const allCategoryOptions = allCategories.filter(c => c !== 'manual');
 
-  const parsedDomains = domainRaw
-    .split(/[\n,;]+/)
-    .map(d => d.trim().toLowerCase().replace(/^https?:\/\//, '').split('?')[0].split('#')[0].replace(/\/$/, ''))
-    .filter(Boolean);
+  const parsedDomains = Array.from(new Set(
+    domainRaw
+      .split(/[\n,;]+/)
+      .map(d => d.trim().toLowerCase().replace(/^https?:\/\//, '').split('?')[0].split('#')[0].replace(/\/$/, ''))
+      .filter(Boolean)
+  ));
 
   const addDomains = async () => {
     setDomainError('');
@@ -1651,7 +1667,7 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
       if (res.ok) {
         const d = await res.json();
         setDomainRaw('');
-        setDomainResult({ added: d.added ?? 0, duplicates: d.duplicates ?? [] });
+        setDomainResult({ added: d.added ?? 0, duplicates: d.duplicates ?? [], superseded: d.superseded ?? [] });
         onRefresh();
       } else {
         const d = await res.json().catch(() => ({}));
@@ -1806,6 +1822,19 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
                   <div className="flex flex-wrap gap-1">
                     {domainResult.duplicates.map(d => (
                       <span key={d} className="px-2 py-0.5 bg-amber-500/10 border border-amber-500/30 rounded text-[11px] font-mono text-amber-300">{d}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {domainResult.superseded && domainResult.superseded.length > 0 && (
+                <div>
+                  <p className="flex items-center gap-2 text-xs text-sky-300 mb-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-sky-400 shrink-0" />
+                    Removed domain-wide block{domainResult.superseded.length !== 1 ? 's' : ''} (now only the specific path is blocked):
+                  </p>
+                  <div className="flex flex-wrap gap-1">
+                    {domainResult.superseded.map(d => (
+                      <span key={d} className="px-2 py-0.5 bg-sky-500/10 border border-sky-500/30 rounded text-[11px] font-mono text-sky-300">{d}</span>
                     ))}
                   </div>
                 </div>
