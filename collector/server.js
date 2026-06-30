@@ -374,7 +374,7 @@ app.get('/api/enforcement', (req, res) => {
 
 /**
  * Top offending domains for a date range — backs the date filter on the
- * Enforcement tab's "Top Offending Domains" table. Defaults to the last 3 days
+ * Enforcement tab's "Top Offending Domains" table. Defaults to the last 7 days
  * when from/to are omitted.
  *
  * `from`/`to` are ISO timestamps. logs.timestamp is stored as UTC ISO
@@ -384,7 +384,7 @@ app.get('/api/enforcement', (req, res) => {
  */
 app.get('/api/enforcement/top-domains', (req, res) => {
   const nowIso = new Date().toISOString();
-  const defaultFromIso = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+  const defaultFromIso = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
   const from = req.query.from || defaultFromIso;
   const to   = req.query.to   || nowIso;
 

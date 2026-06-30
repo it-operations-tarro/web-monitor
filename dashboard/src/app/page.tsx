@@ -1577,11 +1577,11 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
   const [viewCatSearch, setViewCatSearch]         = useState('');
   const VIEW_PAGE_SIZE = 100;
 
-  /* ── Top Offending Domains date filter (defaults to the last 3 days) ── */
+  /* ── Top Offending Domains date filter (defaults to the last 7 days) ── */
   // EST day boundaries, matching the rest of the dashboard's day convention.
   const estDayYMD = (offsetDays = 0) =>
     new Date(Date.now() - 5 * 60 * 60 * 1000 - offsetDays * 86400000).toISOString().slice(0, 10);
-  const [domFrom, setDomFrom] = useState(() => estDayYMD(3));
+  const [domFrom, setDomFrom] = useState(() => estDayYMD(7));
   const [domTo, setDomTo]     = useState(() => estDayYMD(0));
   const [domRows, setDomRows] = useState<any[]>([]);
   const [domLoading, setDomLoading] = useState(false);
@@ -2002,12 +2002,12 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
               onChange={e => e.target.value && setDomTo(e.target.value)}
               className="cursor-pointer bg-[var(--bg-page)] border border-[var(--border-ui)] rounded-md px-2 py-1 text-[11px] text-[var(--text-main)] focus:outline-none focus:border-[#6a29e1]/60 transition-colors"
             />
-            {(domFrom !== estDayYMD(3) || domTo !== estDayYMD(0)) && (
+            {(domFrom !== estDayYMD(7) || domTo !== estDayYMD(0)) && (
               <button
-                onClick={() => { setDomFrom(estDayYMD(3)); setDomTo(estDayYMD(0)); }}
+                onClick={() => { setDomFrom(estDayYMD(7)); setDomTo(estDayYMD(0)); }}
                 className="cursor-pointer px-1.5 py-1 rounded text-[10px] font-semibold text-[#c4b5fd] hover:bg-[#6a29e1]/10 transition-colors"
               >
-                Last 3 days
+                Last 7 days
               </button>
             )}
             {domLoading && <span className="text-[var(--text-muted)] ml-auto">Loading…</span>}
