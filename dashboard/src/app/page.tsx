@@ -1577,6 +1577,30 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
   const [viewCatSearch, setViewCatSearch]         = useState('');
   const VIEW_PAGE_SIZE = 100;
 
+  /* ── Top Offending Domains date filter (defaults to the last 3 days) ── */
+  // EST day boundaries, matching the rest of the dashboard's day convention.
+  const estDayYMD = (offsetDays = 0) =>
+    new Date(Date.now() - 5 * 60 * 60 * 1000 - offsetDays * 86400000).toISOString().slice(0, 10);
+  const [domFrom, setDomFrom] = useState(() => estDayYMD(3));
+  const [domTo, setDomTo]     = useState(() => estDayYMD(0));
+  const [domRows, setDomRows] = useState<any[]>([]);
+  const [domLoading, setDomLoading] = useState(false);
+
+  useEffect(() => {
+    // Picked dates are EST calendar days; map to absolute UTC instants so the
+    // query bounds are correct regardless of the viewer's local timezone.
+    const fromIso = new Date(`${domFrom}T00:00:00-05:00`).toISOString();
+    const toIso   = new Date(`${domTo}T23:59:59.999-05:00`).toISOString();
+    setDomLoading(true);
+    const ctrl = new AbortController();
+    fetch(`${getBaseUrl()}/api/enforcement/top-domains?from=${encodeURIComponent(fromIso)}&to=${encodeURIComponent(toIso)}`, { signal: ctrl.signal })
+      .then(r => r.json())
+      .then(d => setDomRows(Array.isArray(d.topOffendingDomains) ? d.topOffendingDomains : []))
+      .catch(e => { if (e.name !== 'AbortError') setDomRows([]); })
+      .finally(() => setDomLoading(false));
+    return () => ctrl.abort();
+  }, [domFrom, domTo]);
+
   useEffect(() => {
     if (!drillDomain) return;
     setDrillDomainLoading(true);
@@ -1637,7 +1661,6 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
     enabledCategories = [],
     categoryCounts = {},
     manualBlacklist = [],
-    topOffendingDomains = [],
     topOffendingUsers = [],
   } = data;
 
@@ -1959,6 +1982,36 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
         <Panel>
           <PanelHeader accent="danger" title="Top Offending Domains" subtitle="Most-hit blocked domains" />
+          {/* Date-range filter — defaults to the last 3 days */}
+          <div className="flex flex-wrap items-center gap-1.5 px-4 py-2 border-b border-[var(--border-ui)] text-[11px]">
+            <Clock size={11} className="text-[var(--text-muted)] shrink-0" />
+            <span className="text-[var(--text-muted)]">From</span>
+            <input
+              type="date"
+              value={domFrom}
+              max={domTo}
+              onChange={e => e.target.value && setDomFrom(e.target.value)}
+              className="cursor-pointer bg-[var(--bg-page)] border border-[var(--border-ui)] rounded-md px-2 py-1 text-[11px] text-[var(--text-main)] focus:outline-none focus:border-[#6a29e1]/60 transition-colors"
+            />
+            <span className="text-[var(--text-muted)]">To</span>
+            <input
+              type="date"
+              value={domTo}
+              min={domFrom}
+              max={estDayYMD(0)}
+              onChange={e => e.target.value && setDomTo(e.target.value)}
+              className="cursor-pointer bg-[var(--bg-page)] border border-[var(--border-ui)] rounded-md px-2 py-1 text-[11px] text-[var(--text-main)] focus:outline-none focus:border-[#6a29e1]/60 transition-colors"
+            />
+            {(domFrom !== estDayYMD(3) || domTo !== estDayYMD(0)) && (
+              <button
+                onClick={() => { setDomFrom(estDayYMD(3)); setDomTo(estDayYMD(0)); }}
+                className="cursor-pointer px-1.5 py-1 rounded text-[10px] font-semibold text-[#c4b5fd] hover:bg-[#6a29e1]/10 transition-colors"
+              >
+                Last 3 days
+              </button>
+            )}
+            {domLoading && <span className="text-[var(--text-muted)] ml-auto">Loading…</span>}
+          </div>
           <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
@@ -1969,15 +2022,15 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
               </tr>
             </thead>
             <tbody className="divide-y divide-[var(--border-ui)]">
-              {topOffendingDomains.map((d: any) => (
+              {domRows.map((d: any) => (
                 <tr key={d.domain} onClick={() => { setDrillDomain(d.domain); setDrillDomainCat(d.category); }} className="cursor-pointer hover:bg-rose-500/10 transition-colors duration-150 group">
                   <td className={TD}><span className="font-mono text-xs text-[var(--text-main)] group-hover:text-rose-300 transition-colors truncate">{d.domain}</span></td>
                   <td className={TD}><CategoryTag category={d.category} /></td>
                   <td className={`${TD} text-right`}><span className="text-rose-300 font-bold tabular-nums">{d.count}</span></td>
                 </tr>
               ))}
-              {topOffendingDomains.length === 0 && (
-                <tr><td colSpan={3} className="px-4 py-8 text-center text-xs text-[var(--text-muted)] italic">No policy violations recorded.</td></tr>
+              {domRows.length === 0 && !domLoading && (
+                <tr><td colSpan={3} className="px-4 py-8 text-center text-xs text-[var(--text-muted)] italic">No policy violations in this range.</td></tr>
               )}
             </tbody>
           </table>

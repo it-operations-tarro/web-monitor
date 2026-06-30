@@ -372,6 +372,38 @@ app.get('/api/enforcement', (req, res) => {
   });
 });
 
+/**
+ * Top offending domains for a date range — backs the date filter on the
+ * Enforcement tab's "Top Offending Domains" table. Defaults to the last 3 days
+ * when from/to are omitted.
+ *
+ * `from`/`to` are ISO timestamps. logs.timestamp is stored as UTC ISO
+ * (the extension sends new Date().toISOString()), so a lexical string
+ * comparison is also chronological. Parameterized + no dialect-specific date
+ * functions, so this works unchanged on SQLite today and MySQL later.
+ */
+app.get('/api/enforcement/top-domains', (req, res) => {
+  const nowIso = new Date().toISOString();
+  const defaultFromIso = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+  const from = req.query.from || defaultFromIso;
+  const to   = req.query.to   || nowIso;
+
+  db.all(`
+    SELECT domain, category, COUNT(*) as count
+    FROM logs
+    WHERE violation = 1 AND timestamp >= ? AND timestamp <= ?
+    GROUP BY domain
+    ORDER BY count DESC
+    LIMIT 10
+  `, [from, to], (err, rows) => {
+    if (err) {
+      console.error('[top-domains] DB error:', err.message);
+      return res.status(500).json({ error: 'Failed to load top offending domains' });
+    }
+    res.json({ from, to, topOffendingDomains: rows || [] });
+  });
+});
+
 // ─── Enforcement config mutation helpers ───────────────────────────────────
 function readConfig() {
   const configPath = path.join(__dirname, 'config.json');
