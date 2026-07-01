@@ -222,10 +222,12 @@ db.serialize(() => {
   `);
 
   // Block-request workflow for the Top Offending Domains table.
-  // status: 'pending' (Slack sent, awaiting blocklist) | 'done' (blocked → hidden from the list)
+  // Keyed by the normalized offending URL (host + path). status:
+  // 'pending' (Slack sent, awaiting blocklist) | 'done' (blocked → hidden from the list)
   db.run(`
     CREATE TABLE IF NOT EXISTS block_requests (
-      domain TEXT PRIMARY KEY,
+      url TEXT PRIMARY KEY,
+      domain TEXT,
       category TEXT,
       status TEXT NOT NULL DEFAULT 'pending',
       requested_at DATETIME,
@@ -233,6 +235,10 @@ db.serialize(() => {
       resolved_at DATETIME
     )
   `);
+  // Migrate a block_requests table created earlier keyed on `domain` → `url`.
+  // (No-ops once the table already has the current shape.)
+  db.run("ALTER TABLE block_requests RENAME COLUMN domain TO url", () => {});
+  db.run("ALTER TABLE block_requests ADD COLUMN domain TEXT", () => {});
 });
 
 /**
@@ -405,15 +411,30 @@ app.get('/api/enforcement', (req, res) => {
   });
 });
 
+// Normalize a URL to a stable path-specific key: lowercase, strip protocol,
+// query, fragment, and trailing slash. Matches the normalization used when
+// categorizing logs, and is a valid Chrome URLBlocklist entry form.
+function normalizeUrlKey(fullUrl, domain) {
+  const base = (fullUrl || domain || '').toLowerCase()
+    .replace(/^https?:\/\//, '')
+    .split('?')[0]
+    .split('#')[0]
+    .replace(/\/$/, '');
+  return base || (domain || '').toLowerCase();
+}
+
 /**
- * Top offending domains for a date range — backs the date filter on the
+ * Top offending URLs for a date range — backs the date filter on the
  * Enforcement tab's "Top Offending Domains" table. Defaults to the last 7 days
  * when from/to are omitted.
  *
- * `from`/`to` are ISO timestamps. logs.timestamp is stored as UTC ISO
- * (the extension sends new Date().toISOString()), so a lexical string
- * comparison is also chronological. Parameterized + no dialect-specific date
- * functions, so this works unchanged on SQLite today and MySQL later.
+ * Offenders are aggregated by normalized full URL (host + path), not just host,
+ * so path-specific offenders show up distinctly and can be blocked precisely.
+ * Aggregation is done in JS (rather than SQL GROUP BY) so the URL normalization
+ * matches the rest of the app and stays dialect-independent for the MySQL move.
+ *
+ * `from`/`to` are ISO timestamps; logs.timestamp is stored as UTC ISO, so the
+ * parameterized string comparison is also chronological.
  */
 app.get('/api/enforcement/top-domains', (req, res) => {
   const nowIso = new Date().toISOString();
@@ -421,23 +442,40 @@ app.get('/api/enforcement/top-domains', (req, res) => {
   const from = req.query.from || defaultFromIso;
   const to   = req.query.to   || nowIso;
 
-  // LEFT JOIN block_requests so the UI knows each domain's status, and hide any
-  // domain already marked 'done' (blocked in the Chrome Enterprise Policy).
   db.all(`
-    SELECT l.domain AS domain, l.category AS category, COUNT(*) AS count, br.status AS block_status
-    FROM logs l
-    LEFT JOIN block_requests br ON br.domain = l.domain
-    WHERE l.violation = 1 AND l.timestamp >= ? AND l.timestamp <= ?
-      AND (br.status IS NULL OR br.status != 'done')
-    GROUP BY l.domain
-    ORDER BY count DESC
-    LIMIT 10
+    SELECT full_url, domain, category
+    FROM logs
+    WHERE violation = 1 AND timestamp >= ? AND timestamp <= ?
   `, [from, to], (err, rows) => {
     if (err) {
       console.error('[top-domains] DB error:', err.message);
       return res.status(500).json({ error: 'Failed to load top offending domains' });
     }
-    res.json({ from, to, topOffendingDomains: rows || [] });
+
+    // Aggregate violation counts per normalized URL.
+    const agg = new Map();
+    for (const r of rows || []) {
+      const url = normalizeUrlKey(r.full_url, r.domain);
+      if (!url) continue;
+      const cur = agg.get(url);
+      if (cur) cur.count++;
+      else agg.set(url, { url, domain: r.domain, category: r.category, count: 1 });
+    }
+
+    // Attach block status, drop anything already blocked ('done'), take top 10.
+    db.all('SELECT url, status FROM block_requests', [], (err2, brRows) => {
+      if (err2) {
+        console.error('[top-domains] block_requests error:', err2.message);
+        return res.status(500).json({ error: 'Failed to load block statuses' });
+      }
+      const statusByUrl = new Map((brRows || []).map(b => [b.url, b.status]));
+      const list = Array.from(agg.values())
+        .map(x => ({ ...x, block_status: statusByUrl.get(x.url) || null }))
+        .filter(x => x.block_status !== 'done')
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 10);
+      res.json({ from, to, topOffendingDomains: list });
+    });
   });
 });
 
@@ -448,16 +486,17 @@ app.get('/api/enforcement/top-domains', (req, res) => {
  * the domain to the Chrome Enterprise URLBlocklist.
  */
 app.post('/api/enforcement/request-block', async (req, res) => {
-  const { domain, category, count, requestedBy } = req.body || {};
-  if (!domain) return res.status(400).json({ error: 'Missing domain' });
+  const { url, domain, category, count, requestedBy } = req.body || {};
+  const target = url || domain;   // the normalized offending URL (host + path)
+  if (!target) return res.status(400).json({ error: 'Missing url' });
   if (!SLACK_BLOCK_WEBHOOK_URL) {
     return res.status(503).json({ error: 'Slack webhook is not configured on the collector.' });
   }
 
   const text =
     `:no_entry: *Block request — Chrome Enterprise Policy*\n` +
-    `Please add the following site to the Chrome Enterprise blocklist (URLBlocklist):\n` +
-    `*Domain:* \`${domain}\`\n` +
+    `Please add the following URL to the Chrome Enterprise blocklist (URLBlocklist):\n` +
+    `*URL:* \`${target}\`\n` +
     (category ? `*Category:* ${category}\n` : '') +
     (count != null ? `*Recent hits:* ${count}\n` : '') +
     (requestedBy ? `*Requested by:* ${requestedBy}\n` : '') +
@@ -470,18 +509,19 @@ app.post('/api/enforcement/request-block', async (req, res) => {
     return res.status(502).json({ error: 'Failed to send Slack message.' });
   }
 
-  // Slack delivered → mark the domain pending so it shows as such across reloads.
+  // Slack delivered → mark the URL pending so it shows as such across reloads.
   const nowIso = new Date().toISOString();
   db.run(`
-    INSERT INTO block_requests (domain, category, status, requested_at, requested_by, resolved_at)
-    VALUES (?, ?, 'pending', ?, ?, NULL)
-    ON CONFLICT(domain) DO UPDATE SET
+    INSERT INTO block_requests (url, domain, category, status, requested_at, requested_by, resolved_at)
+    VALUES (?, ?, ?, 'pending', ?, ?, NULL)
+    ON CONFLICT(url) DO UPDATE SET
+      domain       = excluded.domain,
       category     = excluded.category,
       status       = 'pending',
       requested_at = excluded.requested_at,
       requested_by = excluded.requested_by,
       resolved_at  = NULL
-  `, [domain, category || null, nowIso, requestedBy || null], (err) => {
+  `, [target, domain || null, category || null, nowIso, requestedBy || null], (err) => {
     if (err) {
       console.error('[request-block] DB error:', err.message);
       return res.status(500).json({ error: 'Slack sent, but failed to record pending status.' });
@@ -491,21 +531,23 @@ app.post('/api/enforcement/request-block', async (req, res) => {
 });
 
 /**
- * Mark a domain as blocked ("done blocking") — it's now in the Chrome Enterprise
+ * Mark a URL as blocked ("done blocking") — it's now in the Chrome Enterprise
  * Policy, so drop it from the Top Offending Domains list.
  */
 app.post('/api/enforcement/mark-blocked', (req, res) => {
-  const { domain, category } = req.body || {};
-  if (!domain) return res.status(400).json({ error: 'Missing domain' });
+  const { url, domain, category } = req.body || {};
+  const target = url || domain;
+  if (!target) return res.status(400).json({ error: 'Missing url' });
 
   const nowIso = new Date().toISOString();
   db.run(`
-    INSERT INTO block_requests (domain, category, status, requested_at, requested_by, resolved_at)
-    VALUES (?, ?, 'done', NULL, NULL, ?)
-    ON CONFLICT(domain) DO UPDATE SET
+    INSERT INTO block_requests (url, domain, category, status, requested_at, requested_by, resolved_at)
+    VALUES (?, ?, ?, 'done', NULL, NULL, ?)
+    ON CONFLICT(url) DO UPDATE SET
+      domain      = excluded.domain,
       status      = 'done',
       resolved_at = excluded.resolved_at
-  `, [domain, category || null, nowIso], (err) => {
+  `, [target, domain || null, category || null, nowIso], (err) => {
     if (err) {
       console.error('[mark-blocked] DB error:', err.message);
       return res.status(500).json({ error: 'Failed to update block status.' });
