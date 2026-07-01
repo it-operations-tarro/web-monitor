@@ -1601,7 +1601,7 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
       const res = await fetch(`${getBaseUrl()}/api/enforcement/request-block`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ domain: d.domain, category: d.category, count: d.count, examplePath: d.example_url }),
+        body: JSON.stringify({ domain: d.domain, category: d.category, count: d.count }),
       });
       if (res.ok) setDomReloadTick(t => t + 1);        // refetch → row shows persisted 'pending'
       else setBlockReq(s => ({ ...s, [d.domain]: 'error' }));
@@ -2020,7 +2020,7 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
         <Panel>
-          <PanelHeader accent="danger" title="Top Offending Domains" subtitle="Most-hit blocked domains (with example path)" />
+          <PanelHeader accent="danger" title="Top Offending Domains" subtitle="Most-hit blocked domains" />
           {/* Date-range filter — defaults to the last 3 days */}
           <div className="flex flex-wrap items-center gap-1.5 px-4 py-2 border-b border-[var(--border-ui)] text-[11px]">
             <Clock size={11} className="text-[var(--text-muted)] shrink-0" />
@@ -2066,12 +2066,7 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
                 const reqState = blockReq[d.domain];
                 return (
                 <tr key={d.domain} onClick={() => { setDrillDomain(d.domain); setDrillDomainCat(d.category); }} className="cursor-pointer hover:bg-rose-500/10 transition-colors duration-150 group">
-                  <td className={TD}>
-                    <span className="font-mono text-xs text-[var(--text-main)] group-hover:text-rose-300 transition-colors truncate">{d.domain}</span>
-                    {d.example_url && d.example_url !== d.domain && (
-                      <span className="block font-mono text-[10px] text-[var(--text-muted)] truncate" title={d.example_url}>{d.example_url}</span>
-                    )}
-                  </td>
+                  <td className={TD}><span className="font-mono text-xs text-[var(--text-main)] group-hover:text-rose-300 transition-colors truncate">{d.domain}</span></td>
                   <td className={TD}><CategoryTag category={d.category} /></td>
                   <td className={`${TD} text-right`}><span className="text-rose-300 font-bold tabular-nums">{d.count}</span></td>
                   <td className={`${TD} text-right`}>
