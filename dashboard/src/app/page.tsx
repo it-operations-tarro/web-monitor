@@ -1588,8 +1588,10 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
   const [domTo, setDomTo]     = useState(() => estDayYMD(0));
   const [domRows, setDomRows] = useState<any[]>([]);
   const [domLoading, setDomLoading] = useState(false);
-  // Per-domain state for the "Request block" Slack button.
-  const [blockReq, setBlockReq] = useState<Record<string, 'sending' | 'sent' | 'error'>>({});
+  const [domReloadTick, setDomReloadTick] = useState(0);
+  // Transient per-domain state while an action is in flight (persisted status
+  // itself lives on each row as `block_status`: 'pending' | 'done' | null).
+  const [blockReq, setBlockReq] = useState<Record<string, 'sending' | 'resolving' | 'error'>>({});
 
   const requestBlock = async (d: any) => {
     setBlockReq(s => ({ ...s, [d.domain]: 'sending' }));
@@ -1599,7 +1601,23 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ domain: d.domain, category: d.category, count: d.count }),
       });
-      setBlockReq(s => ({ ...s, [d.domain]: res.ok ? 'sent' : 'error' }));
+      if (res.ok) setDomReloadTick(t => t + 1);        // refetch → row shows persisted 'pending'
+      else setBlockReq(s => ({ ...s, [d.domain]: 'error' }));
+    } catch {
+      setBlockReq(s => ({ ...s, [d.domain]: 'error' }));
+    }
+  };
+
+  const markBlocked = async (d: any) => {
+    setBlockReq(s => ({ ...s, [d.domain]: 'resolving' }));
+    try {
+      const res = await fetch(`${getBaseUrl()}/api/enforcement/mark-blocked`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ domain: d.domain, category: d.category }),
+      });
+      if (res.ok) setDomReloadTick(t => t + 1);        // refetch → row drops off the list
+      else setBlockReq(s => ({ ...s, [d.domain]: 'error' }));
     } catch {
       setBlockReq(s => ({ ...s, [d.domain]: 'error' }));
     }
@@ -1614,11 +1632,11 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
     const ctrl = new AbortController();
     fetch(`${getBaseUrl()}/api/enforcement/top-domains?from=${encodeURIComponent(fromIso)}&to=${encodeURIComponent(toIso)}`, { signal: ctrl.signal })
       .then(r => r.json())
-      .then(d => setDomRows(Array.isArray(d.topOffendingDomains) ? d.topOffendingDomains : []))
+      .then(d => { setDomRows(Array.isArray(d.topOffendingDomains) ? d.topOffendingDomains : []); setBlockReq({}); })
       .catch(e => { if (e.name !== 'AbortError') setDomRows([]); })
       .finally(() => setDomLoading(false));
     return () => ctrl.abort();
-  }, [domFrom, domTo]);
+  }, [domFrom, domTo, domReloadTick]);
 
   useEffect(() => {
     if (!drillDomain) return;
@@ -2050,23 +2068,42 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
                   <td className={TD}><CategoryTag category={d.category} /></td>
                   <td className={`${TD} text-right`}><span className="text-rose-300 font-bold tabular-nums">{d.count}</span></td>
                   <td className={`${TD} text-right`}>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); if (!reqState || reqState === 'error') requestBlock(d); }}
-                      disabled={reqState === 'sending' || reqState === 'sent'}
-                      title="Send a Slack message requesting this domain be blocked in the Chrome Enterprise Policy"
-                      className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold border transition-colors disabled:cursor-default ${
-                        reqState === 'sent'
-                          ? 'border-emerald-500/40 text-emerald-300 bg-emerald-500/10'
-                          : reqState === 'error'
-                          ? 'border-rose-500/50 text-rose-300 bg-rose-500/10 hover:bg-rose-500/20 cursor-pointer'
-                          : 'border-[var(--border-ui)] text-[#c4b5fd] hover:bg-[#6a29e1]/10 cursor-pointer'
-                      }`}
-                    >
-                      {reqState === 'sending' ? <><Loader2 size={11} className="animate-spin" /> Sending…</>
-                        : reqState === 'sent' ? <><Check size={11} /> Sent</>
-                        : reqState === 'error' ? <><Send size={11} /> Retry</>
-                        : <><Send size={11} /> Request block</>}
-                    </button>
+                    {reqState === 'error' ? (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); requestBlock(d); }}
+                        title="Retry — the last request failed"
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold border border-rose-500/50 text-rose-300 bg-rose-500/10 hover:bg-rose-500/20 cursor-pointer transition-colors"
+                      >
+                        <Send size={11} /> Retry
+                      </button>
+                    ) : d.block_status === 'pending' ? (
+                      <div className="inline-flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                        <span className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold border border-amber-500/40 text-amber-300 bg-amber-500/10">
+                          <Clock size={11} /> Pending
+                        </span>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); markBlocked(d); }}
+                          disabled={reqState === 'resolving'}
+                          title="Mark as blocked in the Chrome Enterprise Policy — removes it from this list"
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold border border-emerald-500/40 text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 cursor-pointer transition-colors disabled:cursor-default disabled:opacity-60"
+                        >
+                          {reqState === 'resolving'
+                            ? <><Loader2 size={11} className="animate-spin" /> Updating…</>
+                            : <><Check size={11} /> Done blocking</>}
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); requestBlock(d); }}
+                        disabled={reqState === 'sending'}
+                        title="Send a Slack message requesting this domain be blocked in the Chrome Enterprise Policy"
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold border border-[var(--border-ui)] text-[#c4b5fd] hover:bg-[#6a29e1]/10 cursor-pointer transition-colors disabled:cursor-default disabled:opacity-60"
+                      >
+                        {reqState === 'sending'
+                          ? <><Loader2 size={11} className="animate-spin" /> Sending…</>
+                          : <><Send size={11} /> Request block</>}
+                      </button>
+                    )}
                   </td>
                 </tr>
               );})}

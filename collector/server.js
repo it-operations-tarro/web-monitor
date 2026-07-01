@@ -220,6 +220,19 @@ db.serialize(() => {
       FOREIGN KEY(child_id) REFERENCES portal_users(id) ON DELETE CASCADE
     )
   `);
+
+  // Block-request workflow for the Top Offending Domains table.
+  // status: 'pending' (Slack sent, awaiting blocklist) | 'done' (blocked → hidden from the list)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS block_requests (
+      domain TEXT PRIMARY KEY,
+      category TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      requested_at DATETIME,
+      requested_by TEXT,
+      resolved_at DATETIME
+    )
+  `);
 });
 
 /**
@@ -408,11 +421,15 @@ app.get('/api/enforcement/top-domains', (req, res) => {
   const from = req.query.from || defaultFromIso;
   const to   = req.query.to   || nowIso;
 
+  // LEFT JOIN block_requests so the UI knows each domain's status, and hide any
+  // domain already marked 'done' (blocked in the Chrome Enterprise Policy).
   db.all(`
-    SELECT domain, category, COUNT(*) as count
-    FROM logs
-    WHERE violation = 1 AND timestamp >= ? AND timestamp <= ?
-    GROUP BY domain
+    SELECT l.domain AS domain, l.category AS category, COUNT(*) AS count, br.status AS block_status
+    FROM logs l
+    LEFT JOIN block_requests br ON br.domain = l.domain
+    WHERE l.violation = 1 AND l.timestamp >= ? AND l.timestamp <= ?
+      AND (br.status IS NULL OR br.status != 'done')
+    GROUP BY l.domain
     ORDER BY count DESC
     LIMIT 10
   `, [from, to], (err, rows) => {
@@ -448,11 +465,53 @@ app.post('/api/enforcement/request-block', async (req, res) => {
 
   try {
     await postSlackMessage(text, SLACK_BLOCK_WEBHOOK_URL);
-    res.json({ status: 'sent' });
   } catch (e) {
     console.error('[request-block] Slack send failed:', e.message);
-    res.status(502).json({ error: 'Failed to send Slack message.' });
+    return res.status(502).json({ error: 'Failed to send Slack message.' });
   }
+
+  // Slack delivered → mark the domain pending so it shows as such across reloads.
+  const nowIso = new Date().toISOString();
+  db.run(`
+    INSERT INTO block_requests (domain, category, status, requested_at, requested_by, resolved_at)
+    VALUES (?, ?, 'pending', ?, ?, NULL)
+    ON CONFLICT(domain) DO UPDATE SET
+      category     = excluded.category,
+      status       = 'pending',
+      requested_at = excluded.requested_at,
+      requested_by = excluded.requested_by,
+      resolved_at  = NULL
+  `, [domain, category || null, nowIso, requestedBy || null], (err) => {
+    if (err) {
+      console.error('[request-block] DB error:', err.message);
+      return res.status(500).json({ error: 'Slack sent, but failed to record pending status.' });
+    }
+    res.json({ status: 'pending' });
+  });
+});
+
+/**
+ * Mark a domain as blocked ("done blocking") — it's now in the Chrome Enterprise
+ * Policy, so drop it from the Top Offending Domains list.
+ */
+app.post('/api/enforcement/mark-blocked', (req, res) => {
+  const { domain, category } = req.body || {};
+  if (!domain) return res.status(400).json({ error: 'Missing domain' });
+
+  const nowIso = new Date().toISOString();
+  db.run(`
+    INSERT INTO block_requests (domain, category, status, requested_at, requested_by, resolved_at)
+    VALUES (?, ?, 'done', NULL, NULL, ?)
+    ON CONFLICT(domain) DO UPDATE SET
+      status      = 'done',
+      resolved_at = excluded.resolved_at
+  `, [domain, category || null, nowIso], (err) => {
+    if (err) {
+      console.error('[mark-blocked] DB error:', err.message);
+      return res.status(500).json({ error: 'Failed to update block status.' });
+    }
+    res.json({ status: 'done' });
+  });
 });
 
 // ─── Enforcement config mutation helpers ───────────────────────────────────
