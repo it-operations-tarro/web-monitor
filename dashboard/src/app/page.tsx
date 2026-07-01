@@ -1596,32 +1596,32 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
   const [openMenu, setOpenMenu] = useState<string | null>(null);
 
   const requestBlock = async (d: any) => {
-    setBlockReq(s => ({ ...s, [d.url]: 'sending' }));
+    setBlockReq(s => ({ ...s, [d.domain]: 'sending' }));
     try {
       const res = await fetch(`${getBaseUrl()}/api/enforcement/request-block`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: d.url, domain: d.domain, category: d.category, count: d.count }),
+        body: JSON.stringify({ domain: d.domain, category: d.category, count: d.count, examplePath: d.example_url }),
       });
       if (res.ok) setDomReloadTick(t => t + 1);        // refetch → row shows persisted 'pending'
-      else setBlockReq(s => ({ ...s, [d.url]: 'error' }));
+      else setBlockReq(s => ({ ...s, [d.domain]: 'error' }));
     } catch {
-      setBlockReq(s => ({ ...s, [d.url]: 'error' }));
+      setBlockReq(s => ({ ...s, [d.domain]: 'error' }));
     }
   };
 
   const markBlocked = async (d: any) => {
-    setBlockReq(s => ({ ...s, [d.url]: 'resolving' }));
+    setBlockReq(s => ({ ...s, [d.domain]: 'resolving' }));
     try {
       const res = await fetch(`${getBaseUrl()}/api/enforcement/mark-blocked`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: d.url, domain: d.domain, category: d.category }),
+        body: JSON.stringify({ domain: d.domain, category: d.category }),
       });
       if (res.ok) setDomReloadTick(t => t + 1);        // refetch → row drops off the list
-      else setBlockReq(s => ({ ...s, [d.url]: 'error' }));
+      else setBlockReq(s => ({ ...s, [d.domain]: 'error' }));
     } catch {
-      setBlockReq(s => ({ ...s, [d.url]: 'error' }));
+      setBlockReq(s => ({ ...s, [d.domain]: 'error' }));
     }
   };
 
@@ -2020,7 +2020,7 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
         <Panel>
-          <PanelHeader accent="danger" title="Top Offending Domains" subtitle="Most-hit blocked URLs (path-specific)" />
+          <PanelHeader accent="danger" title="Top Offending Domains" subtitle="Most-hit blocked domains (with example path)" />
           {/* Date-range filter — defaults to the last 3 days */}
           <div className="flex flex-wrap items-center gap-1.5 px-4 py-2 border-b border-[var(--border-ui)] text-[11px]">
             <Clock size={11} className="text-[var(--text-muted)] shrink-0" />
@@ -2055,7 +2055,7 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-[var(--bg-card-alt)] border-b border-[var(--border-ui)]">
-                <th className={TH}>URL</th>
+                <th className={TH}>Domain</th>
                 <th className={TH}>Category</th>
                 <th className={`${TH} text-right`}>Hits</th>
                 <th className={`${TH} text-right`}>Action</th>
@@ -2063,10 +2063,15 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
             </thead>
             <tbody className="divide-y divide-[var(--border-ui)]">
               {domRows.map((d: any) => {
-                const reqState = blockReq[d.url];
+                const reqState = blockReq[d.domain];
                 return (
-                <tr key={d.url} onClick={() => { setDrillDomain(d.domain); setDrillDomainCat(d.category); }} className="cursor-pointer hover:bg-rose-500/10 transition-colors duration-150 group">
-                  <td className={TD}><span className="font-mono text-xs text-[var(--text-main)] group-hover:text-rose-300 transition-colors break-all" title={d.url}>{d.url}</span></td>
+                <tr key={d.domain} onClick={() => { setDrillDomain(d.domain); setDrillDomainCat(d.category); }} className="cursor-pointer hover:bg-rose-500/10 transition-colors duration-150 group">
+                  <td className={TD}>
+                    <span className="font-mono text-xs text-[var(--text-main)] group-hover:text-rose-300 transition-colors truncate">{d.domain}</span>
+                    {d.example_url && d.example_url !== d.domain && (
+                      <span className="block font-mono text-[10px] text-[var(--text-muted)] truncate" title={d.example_url}>{d.example_url}</span>
+                    )}
+                  </td>
                   <td className={TD}><CategoryTag category={d.category} /></td>
                   <td className={`${TD} text-right`}><span className="text-rose-300 font-bold tabular-nums">{d.count}</span></td>
                   <td className={`${TD} text-right`}>
@@ -2081,7 +2086,7 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
                     ) : d.block_status === 'pending' ? (
                       <div className="relative inline-block" onClick={(e) => e.stopPropagation()}>
                         <button
-                          onClick={() => setOpenMenu(openMenu === d.url ? null : d.url)}
+                          onClick={() => setOpenMenu(openMenu === d.domain ? null : d.domain)}
                           disabled={reqState === 'resolving'}
                           title="Block request pending — click to mark as done blocking"
                           className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold border border-amber-500/40 text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 cursor-pointer transition-colors disabled:cursor-default disabled:opacity-60"
@@ -2090,7 +2095,7 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
                             ? <><Loader2 size={11} className="animate-spin" /> Updating…</>
                             : <><Clock size={11} /> Pending <ChevronDown size={11} /></>}
                         </button>
-                        {openMenu === d.url && reqState !== 'resolving' && (
+                        {openMenu === d.domain && reqState !== 'resolving' && (
                           <>
                             <div className="fixed inset-0 z-10" onClick={() => setOpenMenu(null)} />
                             <div className="absolute right-0 mt-1 z-20 min-w-[9rem] rounded-md border border-[var(--border-ui)] bg-[var(--bg-card)] shadow-lg py-1">

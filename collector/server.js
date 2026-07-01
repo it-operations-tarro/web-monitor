@@ -424,13 +424,13 @@ function normalizeUrlKey(fullUrl, domain) {
 }
 
 /**
- * Top offending URLs for a date range — backs the date filter on the
+ * Top offending hosts for a date range — backs the date filter on the
  * Enforcement tab's "Top Offending Domains" table. Defaults to the last 7 days
  * when from/to are omitted.
  *
- * Offenders are aggregated by normalized full URL (host + path), not just host,
- * so path-specific offenders show up distinctly and can be blocked precisely.
- * Aggregation is done in JS (rather than SQL GROUP BY) so the URL normalization
+ * Offenders are aggregated by host (one row per domain), with a representative
+ * example path (the most-hit URL on that host) surfaced for context. Blocking
+ * is done at the host level. Aggregation is done in JS so URL normalization
  * matches the rest of the app and stays dialect-independent for the MySQL move.
  *
  * `from`/`to` are ISO timestamps; logs.timestamp is stored as UTC ISO, so the
@@ -452,15 +452,25 @@ app.get('/api/enforcement/top-domains', (req, res) => {
       return res.status(500).json({ error: 'Failed to load top offending domains' });
     }
 
-    // Aggregate violation counts per normalized URL.
-    const agg = new Map();
+    // Aggregate violation counts per host, tracking per-path counts so we can
+    // surface the most-hit URL on each host as a representative example.
+    const hosts = new Map();
     for (const r of rows || []) {
-      const url = normalizeUrlKey(r.full_url, r.domain);
-      if (!url) continue;
-      const cur = agg.get(url);
-      if (cur) cur.count++;
-      else agg.set(url, { url, domain: r.domain, category: r.category, count: 1 });
+      const host = (r.domain || '').toLowerCase();
+      if (!host) continue;
+      let h = hosts.get(host);
+      if (!h) { h = { domain: host, category: r.category, count: 0, paths: new Map() }; hosts.set(host, h); }
+      h.count++;
+      if (!h.category && r.category) h.category = r.category;
+      const urlKey = normalizeUrlKey(r.full_url, r.domain);
+      if (urlKey) h.paths.set(urlKey, (h.paths.get(urlKey) || 0) + 1);
     }
+
+    const topPath = (paths) => {
+      let best = null, bestC = -1;
+      for (const [u, c] of paths) if (c > bestC) { bestC = c; best = u; }
+      return best;
+    };
 
     // Attach block status, drop anything already blocked ('done'), take top 10.
     db.all('SELECT url, status FROM block_requests', [], (err2, brRows) => {
@@ -468,9 +478,15 @@ app.get('/api/enforcement/top-domains', (req, res) => {
         console.error('[top-domains] block_requests error:', err2.message);
         return res.status(500).json({ error: 'Failed to load block statuses' });
       }
-      const statusByUrl = new Map((brRows || []).map(b => [b.url, b.status]));
-      const list = Array.from(agg.values())
-        .map(x => ({ ...x, block_status: statusByUrl.get(x.url) || null }))
+      const statusByHost = new Map((brRows || []).map(b => [b.url, b.status]));
+      const list = Array.from(hosts.values())
+        .map(h => ({
+          domain: h.domain,
+          category: h.category,
+          count: h.count,
+          example_url: topPath(h.paths),
+          block_status: statusByHost.get(h.domain) || null,
+        }))
         .filter(x => x.block_status !== 'done')
         .sort((a, b) => b.count - a.count)
         .slice(0, 10);
@@ -486,17 +502,18 @@ app.get('/api/enforcement/top-domains', (req, res) => {
  * the domain to the Chrome Enterprise URLBlocklist.
  */
 app.post('/api/enforcement/request-block', async (req, res) => {
-  const { url, domain, category, count, requestedBy } = req.body || {};
-  const target = url || domain;   // the normalized offending URL (host + path)
-  if (!target) return res.status(400).json({ error: 'Missing url' });
+  const { url, domain, category, count, requestedBy, examplePath } = req.body || {};
+  const target = domain || url;   // block at the host level
+  if (!target) return res.status(400).json({ error: 'Missing domain' });
   if (!SLACK_BLOCK_WEBHOOK_URL) {
     return res.status(503).json({ error: 'Slack webhook is not configured on the collector.' });
   }
 
   const text =
     `:no_entry: *Block request — Chrome Enterprise Policy*\n` +
-    `Please add the following URL to the Chrome Enterprise blocklist (URLBlocklist):\n` +
-    `*URL:* \`${target}\`\n` +
+    `Please add the following site to the Chrome Enterprise blocklist (URLBlocklist):\n` +
+    `*Domain:* \`${target}\`\n` +
+    (examplePath && examplePath !== target ? `*Example path:* ${examplePath}\n` : '') +
     (category ? `*Category:* ${category}\n` : '') +
     (count != null ? `*Recent hits:* ${count}\n` : '') +
     (requestedBy ? `*Requested by:* ${requestedBy}\n` : '') +
@@ -536,8 +553,8 @@ app.post('/api/enforcement/request-block', async (req, res) => {
  */
 app.post('/api/enforcement/mark-blocked', (req, res) => {
   const { url, domain, category } = req.body || {};
-  const target = url || domain;
-  if (!target) return res.status(400).json({ error: 'Missing url' });
+  const target = domain || url;   // host-level key, matches request-block
+  if (!target) return res.status(400).json({ error: 'Missing domain' });
 
   const nowIso = new Date().toISOString();
   db.run(`
