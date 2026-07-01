@@ -2020,7 +2020,7 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
         <Panel>
-          <PanelHeader accent="danger" title="Top Offending Domains" subtitle="Most-hit blocked domains" />
+          <PanelHeader accent="danger" title="Top Offending Domains" subtitle="Most Visited Distraction Domains" />
           {/* Date-range filter — defaults to the last 3 days */}
           <div className="flex flex-wrap items-center gap-1.5 px-4 py-2 border-b border-[var(--border-ui)] text-[11px]">
             <Clock size={11} className="text-[var(--text-muted)] shrink-0" />
