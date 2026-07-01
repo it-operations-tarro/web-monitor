@@ -48,6 +48,42 @@ const PORT = process.env.PORT || 4448;
 // Leave unset to disable notifications.
 const SLACK_WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL || '';
 
+// Separate incoming-webhook for "request block" notifications, so block requests
+// land in their own channel. Falls back to SLACK_WEBHOOK_URL when unset.
+const SLACK_BLOCK_WEBHOOK_URL = process.env.SLACK_BLOCK_WEBHOOK_URL || SLACK_WEBHOOK_URL;
+
+// Post a message to the configured Slack incoming-webhook.
+// Resolves on success, rejects on a bad config or non-2xx response so callers
+// that need delivery confirmation (e.g. the block-request button) can report it.
+function postSlackMessage(text, webhookUrl = SLACK_WEBHOOK_URL) {
+  return new Promise((resolve, reject) => {
+    if (!webhookUrl) return reject(new Error('Slack webhook URL not configured'));
+
+    let url;
+    try { url = new URL(webhookUrl); }
+    catch (e) { return reject(new Error('Invalid Slack webhook URL')); }
+
+    const body = JSON.stringify({ text });
+    const req = https.request({
+      method: 'POST',
+      hostname: url.hostname,
+      port: url.port || 443,
+      path: url.pathname + url.search,
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+    }, (res) => {
+      let data = '';
+      res.on('data', (c) => { data += c; });
+      res.on('end', () => {
+        if (res.statusCode >= 400) reject(new Error(`Slack returned ${res.statusCode}: ${data}`));
+        else resolve();
+      });
+    });
+    req.on('error', reject);
+    req.write(body);
+    req.end();
+  });
+}
+
 function sendSlackViolationNotification({ username, machine_id, domain, full_url, category, timestamp }) {
   if (!SLACK_WEBHOOK_URL) return;
 
@@ -59,24 +95,8 @@ function sendSlackViolationNotification({ username, machine_id, domain, full_url
     `*Category:* ${category || 'unknown'}\n` +
     `*Time:* ${timestamp}`;
 
-  let url;
-  try { url = new URL(SLACK_WEBHOOK_URL); }
-  catch (e) { console.warn('[Slack] Invalid SLACK_WEBHOOK_URL:', e.message); return; }
-
-  const body = JSON.stringify({ text });
-  const req = https.request({
-    method: 'POST',
-    hostname: url.hostname,
-    port: url.port || 443,
-    path: url.pathname + url.search,
-    headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
-  }, (res) => {
-    if (res.statusCode >= 400) console.warn(`[Slack] Webhook returned ${res.statusCode}`);
-    res.resume();
-  });
-  req.on('error', (e) => console.warn('[Slack] Webhook error:', e.message));
-  req.write(body);
-  req.end();
+  // Fire-and-forget; failures are only logged.
+  postSlackMessage(text).catch((e) => console.warn('[Slack] Webhook error:', e.message));
 }
 
 // Middleware
@@ -402,6 +422,37 @@ app.get('/api/enforcement/top-domains', (req, res) => {
     }
     res.json({ from, to, topOffendingDomains: rows || [] });
   });
+});
+
+/**
+ * Notify the team (via Slack) to block a domain in the Chrome Enterprise Policy.
+ * Backs the "Request block" button on the Top Offending Domains table. This does
+ * NOT change any policy itself — it sends a Slack message asking an admin to add
+ * the domain to the Chrome Enterprise URLBlocklist.
+ */
+app.post('/api/enforcement/request-block', async (req, res) => {
+  const { domain, category, count, requestedBy } = req.body || {};
+  if (!domain) return res.status(400).json({ error: 'Missing domain' });
+  if (!SLACK_BLOCK_WEBHOOK_URL) {
+    return res.status(503).json({ error: 'Slack webhook is not configured on the collector.' });
+  }
+
+  const text =
+    `:no_entry: *Block request — Chrome Enterprise Policy*\n` +
+    `Please add the following site to the Chrome Enterprise blocklist (URLBlocklist):\n` +
+    `*Domain:* \`${domain}\`\n` +
+    (category ? `*Category:* ${category}\n` : '') +
+    (count != null ? `*Recent hits:* ${count}\n` : '') +
+    (requestedBy ? `*Requested by:* ${requestedBy}\n` : '') +
+    `*Requested at:* ${new Date().toISOString()}`;
+
+  try {
+    await postSlackMessage(text, SLACK_BLOCK_WEBHOOK_URL);
+    res.json({ status: 'sent' });
+  } catch (e) {
+    console.error('[request-block] Slack send failed:', e.message);
+    res.status(502).json({ error: 'Failed to send Slack message.' });
+  }
 });
 
 // ─── Enforcement config mutation helpers ───────────────────────────────────

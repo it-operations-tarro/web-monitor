@@ -30,6 +30,9 @@ import {
   Filter,
   ChevronDown,
   ChevronLeft,
+  Send,
+  Check,
+  Loader2,
 } from 'lucide-react';
 import {
   BarChart,
@@ -1585,6 +1588,22 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
   const [domTo, setDomTo]     = useState(() => estDayYMD(0));
   const [domRows, setDomRows] = useState<any[]>([]);
   const [domLoading, setDomLoading] = useState(false);
+  // Per-domain state for the "Request block" Slack button.
+  const [blockReq, setBlockReq] = useState<Record<string, 'sending' | 'sent' | 'error'>>({});
+
+  const requestBlock = async (d: any) => {
+    setBlockReq(s => ({ ...s, [d.domain]: 'sending' }));
+    try {
+      const res = await fetch(`${getBaseUrl()}/api/enforcement/request-block`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ domain: d.domain, category: d.category, count: d.count }),
+      });
+      setBlockReq(s => ({ ...s, [d.domain]: res.ok ? 'sent' : 'error' }));
+    } catch {
+      setBlockReq(s => ({ ...s, [d.domain]: 'error' }));
+    }
+  };
 
   useEffect(() => {
     // Picked dates are EST calendar days; map to absolute UTC instants so the
@@ -2019,18 +2038,40 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
                 <th className={TH}>Domain</th>
                 <th className={TH}>Category</th>
                 <th className={`${TH} text-right`}>Hits</th>
+                <th className={`${TH} text-right`}>Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[var(--border-ui)]">
-              {domRows.map((d: any) => (
+              {domRows.map((d: any) => {
+                const reqState = blockReq[d.domain];
+                return (
                 <tr key={d.domain} onClick={() => { setDrillDomain(d.domain); setDrillDomainCat(d.category); }} className="cursor-pointer hover:bg-rose-500/10 transition-colors duration-150 group">
                   <td className={TD}><span className="font-mono text-xs text-[var(--text-main)] group-hover:text-rose-300 transition-colors truncate">{d.domain}</span></td>
                   <td className={TD}><CategoryTag category={d.category} /></td>
                   <td className={`${TD} text-right`}><span className="text-rose-300 font-bold tabular-nums">{d.count}</span></td>
+                  <td className={`${TD} text-right`}>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); if (!reqState || reqState === 'error') requestBlock(d); }}
+                      disabled={reqState === 'sending' || reqState === 'sent'}
+                      title="Send a Slack message requesting this domain be blocked in the Chrome Enterprise Policy"
+                      className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold border transition-colors disabled:cursor-default ${
+                        reqState === 'sent'
+                          ? 'border-emerald-500/40 text-emerald-300 bg-emerald-500/10'
+                          : reqState === 'error'
+                          ? 'border-rose-500/50 text-rose-300 bg-rose-500/10 hover:bg-rose-500/20 cursor-pointer'
+                          : 'border-[var(--border-ui)] text-[#c4b5fd] hover:bg-[#6a29e1]/10 cursor-pointer'
+                      }`}
+                    >
+                      {reqState === 'sending' ? <><Loader2 size={11} className="animate-spin" /> Sending…</>
+                        : reqState === 'sent' ? <><Check size={11} /> Sent</>
+                        : reqState === 'error' ? <><Send size={11} /> Retry</>
+                        : <><Send size={11} /> Request block</>}
+                    </button>
+                  </td>
                 </tr>
-              ))}
+              );})}
               {domRows.length === 0 && !domLoading && (
-                <tr><td colSpan={3} className="px-4 py-8 text-center text-xs text-[var(--text-muted)] italic">No policy violations in this range.</td></tr>
+                <tr><td colSpan={4} className="px-4 py-8 text-center text-xs text-[var(--text-muted)] italic">No policy violations in this range.</td></tr>
               )}
             </tbody>
           </table>
