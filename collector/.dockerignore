@@ -1,0 +1,14 @@
+node_modules
+npm-debug.log
+.env
+config.json
+logs.db
+logs.db-wal
+logs.db-shm
+logs.db.bak
+*.bak
+export.json
+dump_sqlite.py
+load_mysql.js
+Dockerfile
+.dockerignore

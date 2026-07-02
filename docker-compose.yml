@@ -1,0 +1,40 @@
+# Web Monitor — collector (Node/Express API) + dashboard (Next.js).
+# The MySQL/MariaDB database is NOT containerized: both services connect to the
+# existing host database (web-monitor + floor_map_db). host networking lets the
+# collector reach it on localhost:3306 with the same credentials as bare-metal.
+services:
+  collector:
+    build: ./collector
+    image: web-monitor-collector
+    container_name: web-monitor-collector
+    restart: unless-stopped
+    # Share the host network: reach the host MariaDB on localhost:3306 and
+    # serve the API on the host's :4448 (PORT comes from collector/.env).
+    network_mode: host
+    env_file:
+      - ./collector/.env
+    volumes:
+      # Runtime-mutable config (enforcement editor + blacklist sync write to it)
+      - ./collector/config.json:/app/config.json
+      # Drop-in extension artifacts served at /updates without rebuilding
+      - ./collector/updates:/app/updates
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4448/api/stats"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  dashboard:
+    build: ./dashboard
+    image: web-monitor-dashboard
+    container_name: web-monitor-dashboard
+    restart: unless-stopped
+    # Host networking: serve on :3000; the browser calls the collector on :4448.
+    network_mode: host
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - HOSTNAME=0.0.0.0
+    depends_on:
+      - collector
