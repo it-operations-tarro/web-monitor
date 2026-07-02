@@ -74,3 +74,15 @@ CREATE TABLE IF NOT EXISTS user_assignments (
   FOREIGN KEY (parent_id) REFERENCES portal_users(id) ON DELETE CASCADE,
   FOREIGN KEY (child_id)  REFERENCES portal_users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Block-request workflow for the Top Offending Domains table.
+-- status: 'pending' (Slack sent) | 'done' (blocked -> hidden from the list)
+CREATE TABLE IF NOT EXISTS block_requests (
+  url          VARCHAR(512) PRIMARY KEY,
+  domain       VARCHAR(255),
+  category     VARCHAR(255),
+  status       VARCHAR(16) NOT NULL DEFAULT 'pending',
+  requested_at DATETIME,
+  requested_by VARCHAR(255),
+  resolved_at  DATETIME
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -2051,7 +2051,7 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
             )}
             {domLoading && <span className="text-[var(--text-muted)] ml-auto">Loading…</span>}
           </div>
-          <div className="overflow-x-auto">
+          <div>
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-[var(--bg-card-alt)] border-b border-[var(--border-ui)]">
@@ -2079,7 +2079,7 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
                         <Send size={11} /> Retry
                       </button>
                     ) : d.block_status === 'pending' ? (
-                      <div className="relative inline-block" onClick={(e) => e.stopPropagation()}>
+                      <div className="inline-flex flex-col items-end gap-1" onClick={(e) => e.stopPropagation()}>
                         <button
                           onClick={() => setOpenMenu(openMenu === d.domain ? null : d.domain)}
                           disabled={reqState === 'resolving'}
@@ -2093,7 +2093,7 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
                         {openMenu === d.domain && reqState !== 'resolving' && (
                           <>
                             <div className="fixed inset-0 z-10" onClick={() => setOpenMenu(null)} />
-                            <div className="absolute right-0 mt-1 z-20 min-w-[9rem] rounded-md border border-[var(--border-ui)] bg-[var(--bg-card)] shadow-lg py-1">
+                            <div className="relative z-20 min-w-[9rem] rounded-md border border-[var(--border-ui)] bg-[var(--bg-card)] shadow-lg py-1">
                               <button
                                 onClick={() => { setOpenMenu(null); markBlocked(d); }}
                                 className="w-full flex items-center gap-1.5 px-3 py-1.5 text-left text-[11px] text-emerald-300 hover:bg-emerald-500/10 cursor-pointer transition-colors"

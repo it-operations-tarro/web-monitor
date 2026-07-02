@@ -1,7 +1,6 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const fs = require('fs');
 const https = require('https');
@@ -120,147 +119,131 @@ app.use('/updates', express.static(updatesDir, {
   }
 }));
 
-// Database Setup
-const dbPath = path.join(__dirname, 'logs.db');
-const db = new sqlite3.Database(dbPath, (err) => {
-  if (err) {
-    console.error('Error opening database:', err.message);
-  } else {
-    console.log('Connected to the SQLite database.');
-  }
+// ─── Main application DB (MySQL/MariaDB) ────────────────────────────────────
+// Connection pool for the web-monitor data (logs, machines, portal users, …).
+// Configure via DB_* in collector/.env; manage it through phpMyAdmin.
+const pool = mysql.createPool({
+  host:     process.env.DB_HOST || 'localhost',
+  port:     parseInt(process.env.DB_PORT) || 3306,
+  user:     process.env.DB_USER || 'root',
+  password: process.env.DB_PASS || '',
+  database: process.env.DB_NAME || 'web_monitor',
+  waitForConnections: true,
+  connectionLimit: 10,
+  charset: 'utf8mb4_unicode_ci',
+  // Stored timestamps are UTC; interpret returned DATETIMEs as UTC so they
+  // serialize back to the same instant (…T…Z) the dashboard expects.
+  timezone: 'Z',
 });
 
-// WAL mode — allows concurrent reads during writes, critical for 500+ agents
-db.run('PRAGMA journal_mode=WAL');
-db.run('PRAGMA busy_timeout=5000');   // wait up to 5s before failing on a locked write
-db.run('PRAGMA synchronous=NORMAL'); // faster fsync, still crash-safe
+// Normalize an ISO-8601 timestamp (…T…Z, with milliseconds) to a MySQL DATETIME
+// literal 'YYYY-MM-DD HH:MM:SS' in UTC. MySQL's DATETIME rejects the "T"/"Z" and
+// fractional seconds the Chrome extension sends, so every write goes through here.
+function toMysqlDateTime(v) {
+  if (!v) return null;
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return null;
+  return d.toISOString().slice(0, 19).replace('T', ' ');
+}
 
-// Initialize Tables
-db.serialize(() => {
-  db.run(`
-    CREATE TABLE IF NOT EXISTS logs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      machine_id TEXT,
-      username TEXT,
-      domain TEXT,
-      full_url TEXT,
-      timestamp DATETIME,
-      violation BOOLEAN,
-      category TEXT
-    )
-  `);
+// Create tables if they don't exist yet — idempotent, mirrors schema/mysql_schema.sql.
+// Lets the collector provision a fresh MySQL database on first boot.
+async function initSchema() {
+  const statements = [
+    `CREATE TABLE IF NOT EXISTS logs (
+      id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+      machine_id  VARCHAR(255),
+      username    VARCHAR(255),
+      domain      VARCHAR(255),
+      full_url    TEXT,
+      timestamp   DATETIME,
+      violation   TINYINT(1) DEFAULT 0,
+      category    VARCHAR(255),
+      INDEX idx_logs_machine   (machine_id),
+      INDEX idx_logs_username  (username),
+      INDEX idx_logs_timestamp (timestamp),
+      INDEX idx_logs_domain    (domain),
+      INDEX idx_logs_violation (violation)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
-  // Simple migration for existing logs table
-  db.run("ALTER TABLE logs ADD COLUMN category TEXT", () => {});
+    `CREATE TABLE IF NOT EXISTS machines (
+      machine_id        VARCHAR(255) PRIMARY KEY,
+      username          VARCHAR(255),
+      last_seen         DATETIME,
+      ip_address        VARCHAR(64),
+      current_bandwidth BIGINT DEFAULT 0,
+      total_bandwidth   BIGINT DEFAULT 0,
+      extension_version VARCHAR(64),
+      INDEX idx_machines_last_seen (last_seen)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
-  db.run(`
-    CREATE TABLE IF NOT EXISTS machines (
-      machine_id TEXT PRIMARY KEY,
-      username TEXT,
-      last_seen DATETIME,
-      ip_address TEXT,
-      current_bandwidth INTEGER DEFAULT 0,
-      total_bandwidth INTEGER DEFAULT 0,
-      extension_version TEXT
-    )
-  `);
-  // Add column for DBs created before extension-version tracking existed
-  db.run("ALTER TABLE machines ADD COLUMN extension_version TEXT", () => {});
+    `CREATE TABLE IF NOT EXISTS bandwidth_violations (
+      id         BIGINT AUTO_INCREMENT PRIMARY KEY,
+      machine_id VARCHAR(255),
+      username   VARCHAR(255),
+      bytes      BIGINT,
+      timestamp  DATETIME,
+      INDEX idx_bw_machine   (machine_id),
+      INDEX idx_bw_timestamp (timestamp)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
-  db.run(`
-    CREATE TABLE IF NOT EXISTS bandwidth_violations (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      machine_id TEXT,
-      username TEXT,
-      bytes INTEGER,
-      timestamp DATETIME
-    )
-  `);
+    `CREATE TABLE IF NOT EXISTS portal_users (
+      id                   INT AUTO_INCREMENT PRIMARY KEY,
+      name                 VARCHAR(255) NOT NULL,
+      username             VARCHAR(255) NOT NULL UNIQUE,
+      email                VARCHAR(255),
+      password_hash        VARCHAR(255) NOT NULL,
+      role                 VARCHAR(32)  NOT NULL,
+      must_change_password TINYINT(1)   NOT NULL DEFAULT 1,
+      created_at           DATETIME     DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT chk_portal_role CHECK (role IN ('team_lead','manager','director'))
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
-  // Simple migration for existing databases
-  db.run("ALTER TABLE machines ADD COLUMN current_bandwidth INTEGER DEFAULT 0", () => {});
-  db.run("ALTER TABLE machines ADD COLUMN total_bandwidth INTEGER DEFAULT 0", () => {});
+    `CREATE TABLE IF NOT EXISTS agent_assignments (
+      user_id     INT          NOT NULL,
+      agent_email VARCHAR(255) NOT NULL,
+      PRIMARY KEY (user_id, agent_email),
+      FOREIGN KEY (user_id) REFERENCES portal_users(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
-  db.run(`
-    CREATE TABLE IF NOT EXISTS portal_users (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      username TEXT UNIQUE NOT NULL,
-      email TEXT,
-      password_hash TEXT NOT NULL,
-      role TEXT NOT NULL CHECK(role IN ('team_lead','manager','director')),
-      must_change_password INTEGER NOT NULL DEFAULT 1,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
+    `CREATE TABLE IF NOT EXISTS user_assignments (
+      parent_id INT NOT NULL,
+      child_id  INT NOT NULL,
+      PRIMARY KEY (parent_id, child_id),
+      FOREIGN KEY (parent_id) REFERENCES portal_users(id) ON DELETE CASCADE,
+      FOREIGN KEY (child_id)  REFERENCES portal_users(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
-  // Migration for existing portal_users rows
-  db.run("ALTER TABLE portal_users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 1", () => {});
-
-  // Team leads → agents they supervise (keyed by agent email/username)
-  db.run(`
-    CREATE TABLE IF NOT EXISTS agent_assignments (
-      user_id INTEGER NOT NULL,
-      agent_email TEXT NOT NULL,
-      PRIMARY KEY(user_id, agent_email),
-      FOREIGN KEY(user_id) REFERENCES portal_users(id) ON DELETE CASCADE
-    )
-  `);
-
-  // Migrate existing rows: rename machine_id → agent_email if old schema is present
-  db.run(`ALTER TABLE agent_assignments RENAME COLUMN machine_id TO agent_email`, () => {});
-
-  // manager→team_lead or director→manager relationships
-  db.run(`
-    CREATE TABLE IF NOT EXISTS user_assignments (
-      parent_id INTEGER NOT NULL,
-      child_id INTEGER NOT NULL,
-      PRIMARY KEY(parent_id, child_id),
-      FOREIGN KEY(parent_id) REFERENCES portal_users(id) ON DELETE CASCADE,
-      FOREIGN KEY(child_id) REFERENCES portal_users(id) ON DELETE CASCADE
-    )
-  `);
-
-  // Block-request workflow for the Top Offending Domains table.
-  // Keyed by the normalized offending URL (host + path). status:
-  // 'pending' (Slack sent, awaiting blocklist) | 'done' (blocked → hidden from the list)
-  db.run(`
-    CREATE TABLE IF NOT EXISTS block_requests (
-      url TEXT PRIMARY KEY,
-      domain TEXT,
-      category TEXT,
-      status TEXT NOT NULL DEFAULT 'pending',
+    // Block-request workflow for the Top Offending Domains table.
+    // Keyed by the normalized offending URL (host + path). status:
+    // 'pending' (Slack sent, awaiting blocklist) | 'done' (blocked → hidden from the list)
+    `CREATE TABLE IF NOT EXISTS block_requests (
+      url          VARCHAR(512) PRIMARY KEY,
+      domain       VARCHAR(255),
+      category     VARCHAR(255),
+      status       VARCHAR(16) NOT NULL DEFAULT 'pending',
       requested_at DATETIME,
-      requested_by TEXT,
-      resolved_at DATETIME
-    )
-  `);
-  // Migrate a block_requests table created earlier keyed on `domain` → `url`.
-  // (No-ops once the table already has the current shape.)
-  db.run("ALTER TABLE block_requests RENAME COLUMN domain TO url", () => {});
-  db.run("ALTER TABLE block_requests ADD COLUMN domain TEXT", () => {});
-});
+      requested_by VARCHAR(255),
+      resolved_at  DATETIME
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+  ];
+  for (const sql of statements) await pool.query(sql);
+  console.log('Connected to the MySQL database.');
+}
+
+initSchema().catch((e) => console.error('[DB] Schema init failed:', e.message));
 
 /**
  * Endpoint to receive logs from workstations
  */
-app.post('/logs', (req, res) => {
+app.post('/logs', async (req, res) => {
   const { machine_id, username, domain, full_url, timestamp, violation } = req.body;
   const ip = req.ip;
+  const ts = toMysqlDateTime(timestamp);
 
   if (!machine_id || !domain) {
     return res.status(400).json({ error: 'Missing required fields' });
   }
-
-  // Update machine status
-  db.run(`
-    INSERT INTO machines (machine_id, username, last_seen, ip_address)
-    VALUES (?, ?, ?, ?)
-    ON CONFLICT(machine_id) DO UPDATE SET
-      username = excluded.username,
-      last_seen = excluded.last_seen,
-      ip_address = excluded.ip_address
-  `, [machine_id, username, timestamp, ip]);
 
   // Lookup category if it's a violation
   let category = null;
@@ -275,79 +258,94 @@ app.post('/logs', (req, res) => {
     }
   }
 
-  const query = `
-    INSERT INTO logs (machine_id, username, domain, full_url, timestamp, violation, category)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `;
-  
-  db.run(query, [machine_id, username, domain, full_url, timestamp, violation ? 1 : 0, category], function(err) {
-    if (err) {
-      console.error('Database error:', err.message);
-      return res.status(500).json({ error: 'Failed to save log' });
-    }
+  try {
+    // Update machine status
+    await dbRun(`
+      INSERT INTO machines (machine_id, username, last_seen, ip_address)
+      VALUES (?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE
+        username   = VALUES(username),
+        last_seen  = VALUES(last_seen),
+        ip_address = VALUES(ip_address)
+    `, [machine_id, username, ts, ip]);
+
+    await dbRun(`
+      INSERT INTO logs (machine_id, username, domain, full_url, timestamp, violation, category)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `, [machine_id, username, domain, full_url, ts, violation ? 1 : 0, category]);
+
     console.log(`[LOG] Recieved from ${machine_id}: ${domain} [Violation: ${violation ? 'YES' : 'NO'}]`);
     if (violation) {
       sendSlackViolationNotification({ username, machine_id, domain, full_url, category, timestamp });
     }
     res.status(201).json({ status: 'success' });
-  });
+  } catch (err) {
+    console.error('Database error:', err.message);
+    res.status(500).json({ error: 'Failed to save log' });
+  }
 });
 
 /**
  * Endpoint for heartbeat/ping
  */
-app.post('/ping', (req, res) => {
+app.post('/ping', async (req, res) => {
   const { machine_id, username, timestamp, bandwidth, extension_version } = req.body;
   const ip = req.ip;
   const currentBandwidth = bandwidth || 0;
   const extVersion = extension_version || null;
+  const ts = toMysqlDateTime(timestamp);
 
   if (!machine_id) return res.status(400).send();
 
-  db.run(`
-    INSERT INTO machines (machine_id, username, last_seen, ip_address, current_bandwidth, total_bandwidth, extension_version)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(machine_id) DO UPDATE SET
-      username = excluded.username,
-      last_seen = excluded.last_seen,
-      ip_address = excluded.ip_address,
-      current_bandwidth = excluded.current_bandwidth,
-      total_bandwidth = machines.total_bandwidth + excluded.current_bandwidth,
-      extension_version = COALESCE(excluded.extension_version, machines.extension_version)
-  `, [machine_id, username, timestamp, ip, currentBandwidth, currentBandwidth, extVersion], (err) => {
-    if (err) return res.status(500).send();
-    
+  try {
+    await dbRun(`
+      INSERT INTO machines (machine_id, username, last_seen, ip_address, current_bandwidth, total_bandwidth, extension_version)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE
+        username          = VALUES(username),
+        last_seen         = VALUES(last_seen),
+        ip_address        = VALUES(ip_address),
+        current_bandwidth = VALUES(current_bandwidth),
+        total_bandwidth   = total_bandwidth + VALUES(current_bandwidth),
+        extension_version = COALESCE(VALUES(extension_version), extension_version)
+    `, [machine_id, username, ts, ip, currentBandwidth, currentBandwidth, extVersion]);
+
     // Log violation history if threshold exceeded (10MB/min)
     if (currentBandwidth > 10 * 1024 * 1024) {
-      db.run(`
+      await dbRun(`
         INSERT INTO bandwidth_violations (machine_id, username, bytes, timestamp)
         VALUES (?, ?, ?, ?)
-      `, [machine_id, username, currentBandwidth, timestamp]);
+      `, [machine_id, username, currentBandwidth, ts]);
     }
 
     res.status(200).json({ status: 'pong' });
-  });
+  } catch (err) {
+    res.status(500).send();
+  }
 });
 
 /**
  * Endpoint to fetch all machines
  */
-app.get('/api/machines', (req, res) => {
-  db.all('SELECT * FROM machines ORDER BY last_seen DESC', (err, rows) => {
-    if (err) return res.status(500).json({ error: 'Failed to fetch machines' });
+app.get('/api/machines', async (req, res) => {
+  try {
+    const rows = await dbAll('SELECT * FROM machines ORDER BY last_seen DESC');
     res.json(rows);
-  });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch machines' });
+  }
 });
 
 /**
  * Endpoint to delete a machine
  */
-app.delete('/api/machines/:id', (req, res) => {
-  const machineId = req.params.id;
-  db.run('DELETE FROM machines WHERE machine_id = ?', [machineId], (err) => {
-    if (err) return res.status(500).json({ error: 'Failed to delete machine' });
+app.delete('/api/machines/:id', async (req, res) => {
+  try {
+    await dbRun('DELETE FROM machines WHERE machine_id = ?', [req.params.id]);
     res.json({ status: 'deleted' });
-  });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to delete machine' });
+  }
 });
 
 /**
@@ -355,7 +353,7 @@ app.delete('/api/machines/:id', (req, res) => {
  * Returns a compact view of config.json (the full file is multi-MB) joined
  * with violation aggregates from the logs table.
  */
-app.get('/api/enforcement', (req, res) => {
+app.get('/api/enforcement', async (req, res) => {
   const configPath = path.join(__dirname, 'config.json');
 
   let config;
@@ -385,30 +383,29 @@ app.get('/api/enforcement', (req, res) => {
     manualBlacklist: config.manual_blacklist || []
   };
 
-  db.serialize(() => {
-    db.all(`
+  try {
+    summary.topOffendingDomains = await dbAll(`
       SELECT domain, category, COUNT(*) as count
       FROM logs
       WHERE violation = 1
-      GROUP BY domain
+      GROUP BY domain, category
       ORDER BY count DESC
       LIMIT 10
-    `, (err, topDomains) => {
-      summary.topOffendingDomains = topDomains || [];
+    `);
 
-      db.all(`
-        SELECT username, machine_id, COUNT(*) as count
-        FROM logs
-        WHERE violation = 1 AND username IS NOT NULL
-        GROUP BY username
-        ORDER BY count DESC
-        LIMIT 10
-      `, (err, topUsers) => {
-        summary.topOffendingUsers = topUsers || [];
-        res.json(summary);
-      });
-    });
-  });
+    summary.topOffendingUsers = await dbAll(`
+      SELECT username, MAX(machine_id) as machine_id, COUNT(*) as count
+      FROM logs
+      WHERE violation = 1 AND username IS NOT NULL
+      GROUP BY username
+      ORDER BY count DESC
+      LIMIT 10
+    `);
+
+    res.json(summary);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to load enforcement summary' });
+  }
 });
 
 /**
@@ -423,21 +420,18 @@ app.get('/api/enforcement', (req, res) => {
  * `from`/`to` are ISO timestamps; logs.timestamp is stored as UTC ISO, so the
  * parameterized string comparison is also chronological.
  */
-app.get('/api/enforcement/top-domains', (req, res) => {
+app.get('/api/enforcement/top-domains', async (req, res) => {
   const nowIso = new Date().toISOString();
   const defaultFromIso = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
   const from = req.query.from || defaultFromIso;
   const to   = req.query.to   || nowIso;
 
-  db.all(`
-    SELECT domain, category
-    FROM logs
-    WHERE violation = 1 AND timestamp >= ? AND timestamp <= ?
-  `, [from, to], (err, rows) => {
-    if (err) {
-      console.error('[top-domains] DB error:', err.message);
-      return res.status(500).json({ error: 'Failed to load top offending domains' });
-    }
+  try {
+    const rows = await dbAll(`
+      SELECT domain, category
+      FROM logs
+      WHERE violation = 1 AND timestamp >= ? AND timestamp <= ?
+    `, [toMysqlDateTime(from), toMysqlDateTime(to)]);
 
     // Aggregate violation counts per host.
     const hosts = new Map();
@@ -451,20 +445,18 @@ app.get('/api/enforcement/top-domains', (req, res) => {
     }
 
     // Attach block status, drop anything already blocked ('done'), take top 10.
-    db.all('SELECT url, status FROM block_requests', [], (err2, brRows) => {
-      if (err2) {
-        console.error('[top-domains] block_requests error:', err2.message);
-        return res.status(500).json({ error: 'Failed to load block statuses' });
-      }
-      const statusByHost = new Map((brRows || []).map(b => [b.url, b.status]));
-      const list = Array.from(hosts.values())
-        .map(h => ({ ...h, block_status: statusByHost.get(h.domain) || null }))
-        .filter(x => x.block_status !== 'done')
-        .sort((a, b) => b.count - a.count)
-        .slice(0, 10);
-      res.json({ from, to, topOffendingDomains: list });
-    });
-  });
+    const brRows = await dbAll('SELECT url, status FROM block_requests');
+    const statusByHost = new Map((brRows || []).map(b => [b.url, b.status]));
+    const list = Array.from(hosts.values())
+      .map(h => ({ ...h, block_status: statusByHost.get(h.domain) || null }))
+      .filter(x => x.block_status !== 'done')
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
+    res.json({ from, to, topOffendingDomains: list });
+  } catch (err) {
+    console.error('[top-domains] DB error:', err.message);
+    res.status(500).json({ error: 'Failed to load top offending domains' });
+  }
 });
 
 /**
@@ -498,50 +490,50 @@ app.post('/api/enforcement/request-block', async (req, res) => {
   }
 
   // Slack delivered → mark the URL pending so it shows as such across reloads.
-  const nowIso = new Date().toISOString();
-  db.run(`
-    INSERT INTO block_requests (url, domain, category, status, requested_at, requested_by, resolved_at)
-    VALUES (?, ?, ?, 'pending', ?, ?, NULL)
-    ON CONFLICT(url) DO UPDATE SET
-      domain       = excluded.domain,
-      category     = excluded.category,
-      status       = 'pending',
-      requested_at = excluded.requested_at,
-      requested_by = excluded.requested_by,
-      resolved_at  = NULL
-  `, [target, domain || null, category || null, nowIso, requestedBy || null], (err) => {
-    if (err) {
-      console.error('[request-block] DB error:', err.message);
-      return res.status(500).json({ error: 'Slack sent, but failed to record pending status.' });
-    }
+  const now = toMysqlDateTime(new Date().toISOString());
+  try {
+    await dbRun(`
+      INSERT INTO block_requests (url, domain, category, status, requested_at, requested_by, resolved_at)
+      VALUES (?, ?, ?, 'pending', ?, ?, NULL)
+      ON DUPLICATE KEY UPDATE
+        domain       = VALUES(domain),
+        category     = VALUES(category),
+        status       = 'pending',
+        requested_at = VALUES(requested_at),
+        requested_by = VALUES(requested_by),
+        resolved_at  = NULL
+    `, [target, domain || null, category || null, now, requestedBy || null]);
     res.json({ status: 'pending' });
-  });
+  } catch (err) {
+    console.error('[request-block] DB error:', err.message);
+    res.status(500).json({ error: 'Slack sent, but failed to record pending status.' });
+  }
 });
 
 /**
  * Mark a URL as blocked ("done blocking") — it's now in the Chrome Enterprise
  * Policy, so drop it from the Top Offending Domains list.
  */
-app.post('/api/enforcement/mark-blocked', (req, res) => {
+app.post('/api/enforcement/mark-blocked', async (req, res) => {
   const { url, domain, category } = req.body || {};
   const target = domain || url;   // host-level key, matches request-block
   if (!target) return res.status(400).json({ error: 'Missing domain' });
 
-  const nowIso = new Date().toISOString();
-  db.run(`
-    INSERT INTO block_requests (url, domain, category, status, requested_at, requested_by, resolved_at)
-    VALUES (?, ?, ?, 'done', NULL, NULL, ?)
-    ON CONFLICT(url) DO UPDATE SET
-      domain      = excluded.domain,
-      status      = 'done',
-      resolved_at = excluded.resolved_at
-  `, [target, domain || null, category || null, nowIso], (err) => {
-    if (err) {
-      console.error('[mark-blocked] DB error:', err.message);
-      return res.status(500).json({ error: 'Failed to update block status.' });
-    }
+  const now = toMysqlDateTime(new Date().toISOString());
+  try {
+    await dbRun(`
+      INSERT INTO block_requests (url, domain, category, status, requested_at, requested_by, resolved_at)
+      VALUES (?, ?, ?, 'done', NULL, NULL, ?)
+      ON DUPLICATE KEY UPDATE
+        domain      = VALUES(domain),
+        status      = 'done',
+        resolved_at = VALUES(resolved_at)
+    `, [target, domain || null, category || null, now]);
     res.json({ status: 'done' });
-  });
+  } catch (err) {
+    console.error('[mark-blocked] DB error:', err.message);
+    res.status(500).json({ error: 'Failed to update block status.' });
+  }
 });
 
 // ─── Enforcement config mutation helpers ───────────────────────────────────
@@ -743,74 +735,64 @@ app.get('/api/config', (req, res) => {
 /**
  * Endpoint for Dashboard to fetch data
  */
-app.get('/api/logs', (req, res) => {
+app.get('/api/logs', async (req, res) => {
   const limit = parseInt(req.query.limit) || 100;
-  db.all('SELECT * FROM logs ORDER BY timestamp DESC LIMIT ?', [limit], (err, rows) => {
-    if (err) {
-      return res.status(500).json({ error: 'Failed to fetch logs' });
-    }
+  try {
+    const rows = await dbAll('SELECT * FROM logs ORDER BY timestamp DESC LIMIT ?', [limit]);
     res.json(rows);
-  });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch logs' });
+  }
 });
 
 /**
  * Endpoint to fetch bandwidth violation history
  */
-app.get('/api/bandwidth-violations', (req, res) => {
+app.get('/api/bandwidth-violations', async (req, res) => {
   const limit = parseInt(req.query.limit) || 20;
-  db.all('SELECT * FROM bandwidth_violations ORDER BY timestamp DESC LIMIT ?', [limit], (err, rows) => {
-    if (err) return res.status(500).json({ error: 'Failed to fetch bandwidth violations' });
+  try {
+    const rows = await dbAll('SELECT * FROM bandwidth_violations ORDER BY timestamp DESC LIMIT ?', [limit]);
     res.json(rows);
-  });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch bandwidth violations' });
+  }
 });
 
 /**
  * Endpoint for dashboard summary stats
  */
-app.get('/api/stats', (req, res) => {
+app.get('/api/stats', async (req, res) => {
   const stats = {};
-  
-  db.serialize(() => {
-    db.get('SELECT COUNT(*) as count FROM logs', (err, row) => {
-      stats.totalLogs = row?.count || 0;
-    });
-
-    db.get('SELECT COUNT(*) as count FROM logs WHERE violation = 1', (err, row) => {
-      stats.totalViolations = row?.count || 0;
-    });
-
-    db.get('SELECT COUNT(DISTINCT machine_id) as count FROM logs', (err, row) => {
-      stats.uniqueMachines = row?.count || 0;
-    });
-
-    db.all(`
-      SELECT domain, COUNT(*) as count 
-      FROM logs 
-      GROUP BY domain 
-      ORDER BY count DESC 
+  try {
+    stats.totalLogs       = (await dbGet('SELECT COUNT(*) as count FROM logs'))?.count || 0;
+    stats.totalViolations = (await dbGet('SELECT COUNT(*) as count FROM logs WHERE violation = 1'))?.count || 0;
+    stats.uniqueMachines  = (await dbGet('SELECT COUNT(DISTINCT machine_id) as count FROM logs'))?.count || 0;
+    stats.topDomains      = await dbAll(`
+      SELECT domain, COUNT(*) as count
+      FROM logs
+      GROUP BY domain
+      ORDER BY count DESC
       LIMIT 5
-    `, (err, rows) => {
-      stats.topDomains = rows || [];
-      res.json(stats);
-    });
-  });
+    `);
+    res.json(stats);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch stats' });
+  }
 });
 
-// ─── DB promise helpers ────────────────────────────────────────────────────
-function dbRun(sql, params = []) {
-  return new Promise((resolve, reject) =>
-    db.run(sql, params, function (err) { err ? reject(err) : resolve(this); })
-  );
+// ─── DB promise helpers (MySQL) ─────────────────────────────────────────────
+// dbRun exposes lastID/changes to mirror the previous sqlite3 helper contract.
+async function dbRun(sql, params = []) {
+  const [result] = await pool.query(sql, params);
+  return { lastID: result.insertId, changes: result.affectedRows };
 }
-function dbGet(sql, params = []) {
-  return new Promise((resolve, reject) =>
-    db.get(sql, params, (err, row) => (err ? reject(err) : resolve(row)))
-  );
+async function dbGet(sql, params = []) {
+  const [rows] = await pool.query(sql, params);
+  return rows[0];
 }
-function dbAll(sql, params = []) {
-  return new Promise((resolve, reject) =>
-    db.all(sql, params, (err, rows) => (err ? reject(err) : resolve(rows || [])))
-  );
+async function dbAll(sql, params = []) {
+  const [rows] = await pool.query(sql, params);
+  return rows || [];
 }
 
 // ─── Auth middleware ───────────────────────────────────────────────────────
@@ -929,7 +911,7 @@ app.post('/api/users', async (req, res) => {
     );
     res.status(201).json({ id: result.lastID, name, username, email, role });
   } catch (e) {
-    if (e.message?.includes('UNIQUE')) return res.status(409).json({ error: 'Username already exists' });
+    if (e.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'Username already exists' });
     res.status(500).json({ error: 'Failed to create user' });
   }
 });
@@ -957,7 +939,7 @@ app.post('/api/users/:id/agents', async (req, res) => {
   const { agent_email } = req.body;
   if (!agent_email) return res.status(400).json({ error: 'Missing agent_email' });
   try {
-    await dbRun('INSERT OR IGNORE INTO agent_assignments (user_id, agent_email) VALUES (?, ?)', [req.params.id, agent_email.trim().toLowerCase()]);
+    await dbRun('INSERT IGNORE INTO agent_assignments (user_id, agent_email) VALUES (?, ?)', [req.params.id, agent_email.trim().toLowerCase()]);
     res.status(201).json({ status: 'assigned' });
   } catch {
     res.status(500).json({ error: 'Failed to assign agent' });
@@ -970,7 +952,7 @@ app.post('/api/users/:id/agents/bulk', async (req, res) => {
   if (!Array.isArray(emails) || !emails.length) return res.status(400).json({ error: 'Missing emails array' });
   try {
     for (const email of emails) {
-      await dbRun('INSERT OR IGNORE INTO agent_assignments (user_id, agent_email) VALUES (?, ?)', [req.params.id, email.trim().toLowerCase()]);
+      await dbRun('INSERT IGNORE INTO agent_assignments (user_id, agent_email) VALUES (?, ?)', [req.params.id, email.trim().toLowerCase()]);
     }
     res.status(201).json({ status: 'assigned', count: emails.length });
   } catch {
@@ -1089,7 +1071,7 @@ app.post('/api/users/:id/reports', async (req, res) => {
   const { child_id } = req.body;
   if (!child_id) return res.status(400).json({ error: 'Missing child_id' });
   try {
-    await dbRun('INSERT OR IGNORE INTO user_assignments (parent_id, child_id) VALUES (?, ?)', [req.params.id, child_id]);
+    await dbRun('INSERT IGNORE INTO user_assignments (parent_id, child_id) VALUES (?, ?)', [req.params.id, child_id]);
     res.status(201).json({ status: 'assigned' });
   } catch {
     res.status(500).json({ error: 'Failed to assign report' });
@@ -1289,16 +1271,18 @@ app.get('/api/team-leads', async (req, res) => {
 // GET /api/agents — all known agents with aggregated stats
 app.get('/api/agents', async (req, res) => {
   try {
+    // Non-aggregated machine columns are wrapped in MAX() to satisfy MySQL's
+    // ONLY_FULL_GROUP_BY (a username maps to a single machine in practice).
     const agents = await dbAll(`
       SELECT
         l.username,
-        m.machine_id,
-        m.last_seen,
-        m.ip_address,
-        m.current_bandwidth,
-        m.total_bandwidth,
-        COUNT(l.id)                                             AS total_sessions,
-        SUM(CASE WHEN l.violation = 1 THEN 1 ELSE 0 END)       AS total_violations
+        MAX(m.machine_id)                                     AS machine_id,
+        MAX(m.last_seen)                                      AS last_seen,
+        MAX(m.ip_address)                                     AS ip_address,
+        MAX(m.current_bandwidth)                              AS current_bandwidth,
+        MAX(m.total_bandwidth)                                AS total_bandwidth,
+        COUNT(l.id)                                           AS total_sessions,
+        SUM(CASE WHEN l.violation = 1 THEN 1 ELSE 0 END)      AS total_violations
       FROM logs l
       LEFT JOIN machines m ON l.username = m.username
       WHERE l.username IS NOT NULL AND l.username != ''
@@ -1370,14 +1354,14 @@ app.get('/api/agents/:email/logs', async (req, res) => {
   let date = req.query.date;
   if (!date) {
     const last = await dbGet(
-      "SELECT DATE(timestamp, '-5 hours') as d FROM logs WHERE username = ? ORDER BY timestamp DESC LIMIT 1",
+      "SELECT DATE_FORMAT(timestamp - INTERVAL 5 HOUR, '%Y-%m-%d') as d FROM logs WHERE username = ? ORDER BY timestamp DESC LIMIT 1",
       [email]
     );
     date = last?.d || estToday();
   }
   try {
-    // Use DATE(timestamp, '-5 hours') so the day boundary is midnight EST, not UTC
-    let sql = "SELECT * FROM logs WHERE username = ? AND DATE(timestamp, '-5 hours') = ?";
+    // Shift UTC by −5h before DATE() so the day boundary is midnight EST, not UTC
+    let sql = "SELECT * FROM logs WHERE username = ? AND DATE(timestamp - INTERVAL 5 HOUR) = ?";
     const params = [email, date];
     if (filter === 'violations') sql += ' AND violation = 1';
     sql += ' ORDER BY timestamp DESC LIMIT ? OFFSET ?';
@@ -1393,18 +1377,19 @@ app.get('/api/agents/:email/logs', async (req, res) => {
 /**
  * All violation logs for a specific domain (no date restriction)
  */
-app.get('/api/logs/domain/:domain', (req, res) => {
+app.get('/api/logs/domain/:domain', async (req, res) => {
   const domain = decodeURIComponent(req.params.domain);
   const limit  = Math.min(parseInt(req.query.limit) || 100, 500);
   const offset = parseInt(req.query.offset) || 0;
-  db.all(
-    'SELECT * FROM logs WHERE domain = ? AND violation = 1 ORDER BY timestamp DESC LIMIT ? OFFSET ?',
-    [domain, limit, offset],
-    (err, rows) => {
-      if (err) return res.status(500).json({ error: 'Failed to fetch domain logs' });
-      res.json(rows);
-    }
-  );
+  try {
+    const rows = await dbAll(
+      'SELECT * FROM logs WHERE domain = ? AND violation = 1 ORDER BY timestamp DESC LIMIT ? OFFSET ?',
+      [domain, limit, offset]
+    );
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch domain logs' });
+  }
 });
 
 /**
@@ -1428,8 +1413,8 @@ app.get('/api/agents/:email/violations', async (req, res) => {
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Collector API running on http://0.0.0.0:${PORT}`);
-  console.log(`📂 Database located at: ${dbPath}`);
-  
+  console.log(`📂 Database: MySQL ${process.env.DB_NAME || 'web_monitor'}@${process.env.DB_HOST || 'localhost'}:${parseInt(process.env.DB_PORT) || 3306}`);
+
   // Initial sync and schedule daily sync (every 24 hours)
   syncBlacklists();
   setInterval(syncBlacklists, 24 * 60 * 60 * 1000);
