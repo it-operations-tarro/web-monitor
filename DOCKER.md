@@ -1,7 +1,7 @@
 # Running Web Monitor with Docker
 
 Two containers — **collector** (Node/Express API, port 4448) and **dashboard**
-(Next.js, port 3000) — orchestrated by `docker-compose.yml`. The **database is
+(Next.js, port 4447) — orchestrated by `docker-compose.yml`. The **database is
 not containerized**: both connect to the existing host MariaDB (`web-monitor`
 and `floor_map_db`).
 
@@ -21,7 +21,8 @@ and `floor_map_db`).
 ```bash
 cd /var/www/html/web-monitor         # repo root (where docker-compose.yml lives)
 
-# 1. Free the ports — the pm2 processes currently own 4448 and 3000.
+# 1. Free the ports — the pm2 processes currently own 4448 and 3000
+#    (the dashboard container now serves on 4447; make sure it's free too).
 pm2 delete web-monitor-collector web-monitor-dashboard   # use their real names
 #   (or `pm2 stop ...`). With host networking, the containers bind these ports
 #   directly, so the old processes must not be running.
@@ -39,7 +40,7 @@ Verify:
 ```bash
 curl http://localhost:4448/api/stats      # expect real numbers, "totalLogs": 46571
 ```
-Then open the dashboard on port 3000.
+Then open the dashboard on port 4447.
 
 ## Everyday operations
 

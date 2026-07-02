@@ -30,11 +30,11 @@ services:
     image: web-monitor-dashboard
     container_name: web-monitor-dashboard
     restart: unless-stopped
-    # Host networking: serve on :3000; the browser calls the collector on :4448.
+    # Host networking: serve on :4447; the browser calls the collector on :4448.
     network_mode: host
     environment:
       - NODE_ENV=production
-      - PORT=3000
+      - PORT=4447
       - HOSTNAME=0.0.0.0
     depends_on:
       - collector
