@@ -98,6 +98,127 @@ function sendSlackViolationNotification({ username, machine_id, domain, full_url
   postSlackMessage(text).catch((e) => console.warn('[Slack] Webhook error:', e.message));
 }
 
+// ─── Jira Service Management (block-request tickets) ───────────────────────
+// The "Request block" button on the Top Offending Domains table raises a Jira
+// Service Management request instead of pinging Slack. When that ticket is
+// resolved in Jira, a background poller drops the domain from the table.
+const JIRA_BASE_URL        = (process.env.JIRA_BASE_URL || '').replace(/\/$/, '');
+const JIRA_EMAIL           = process.env.JIRA_EMAIL || '';
+const JIRA_API_TOKEN       = process.env.JIRA_API_TOKEN || '';
+const JIRA_SERVICE_DESK_ID = process.env.JIRA_SERVICE_DESK_ID || '';   // WIT = 2
+const JIRA_REQUEST_TYPE_ID = process.env.JIRA_REQUEST_TYPE_ID || '';   // "Software Installation, Configuration, and Updates" = 271
+const JIRA_POLL_MS         = Number(process.env.JIRA_POLL_MS) || 300000;
+// Required fields on the WIT request type. Impact/Urgency are options; Location
+// and Site are JSM Assets (CMDB) objects referenced by object id.
+const JIRA_IMPACT_ID          = process.env.JIRA_IMPACT_ID || '';          // 10002 = Standard
+const JIRA_URGENCY_ID         = process.env.JIRA_URGENCY_ID || '';         // 10115 = Standard
+const JIRA_WORKSPACE_ID       = process.env.JIRA_WORKSPACE_ID || '';       // Assets workspace id
+const JIRA_LOCATION_OBJECT_ID = process.env.JIRA_LOCATION_OBJECT_ID || ''; // e.g. 132529 (PH)
+const JIRA_SITE_OBJECT_ID     = process.env.JIRA_SITE_OBJECT_ID || '';     // e.g. 143901 (DGT)
+
+const jiraConfigured = !!(JIRA_BASE_URL && JIRA_EMAIL && JIRA_API_TOKEN &&
+                          JIRA_SERVICE_DESK_ID && JIRA_REQUEST_TYPE_ID);
+
+// Minimal HTTPS JSON call to Jira Cloud with Basic auth (email:api-token).
+// Resolves with the parsed response body, rejects on a bad config or non-2xx.
+function jiraRequest(method, apiPath, bodyObj) {
+  return new Promise((resolve, reject) => {
+    if (!JIRA_BASE_URL || !JIRA_EMAIL || !JIRA_API_TOKEN) {
+      return reject(new Error('Jira is not configured'));
+    }
+    let url;
+    try { url = new URL(JIRA_BASE_URL + apiPath); }
+    catch (e) { return reject(new Error('Invalid Jira URL')); }
+
+    const body = bodyObj ? JSON.stringify(bodyObj) : null;
+    const auth = Buffer.from(`${JIRA_EMAIL}:${JIRA_API_TOKEN}`).toString('base64');
+    const headers = { Authorization: `Basic ${auth}`, Accept: 'application/json' };
+    if (body) {
+      headers['Content-Type'] = 'application/json';
+      headers['Content-Length'] = Buffer.byteLength(body);
+    }
+    const req = https.request({
+      method,
+      hostname: url.hostname,
+      port: url.port || 443,
+      path: url.pathname + url.search,
+      headers,
+    }, (res) => {
+      let data = '';
+      res.on('data', (c) => { data += c; });
+      res.on('end', () => {
+        if (res.statusCode >= 400) return reject(new Error(`Jira ${res.statusCode}: ${data}`));
+        try { resolve(data ? JSON.parse(data) : {}); }
+        catch (e) { reject(new Error('Bad JSON from Jira')); }
+      });
+    });
+    req.on('error', reject);
+    if (body) req.write(body);
+    req.end();
+  });
+}
+
+// Raise a JSM request asking IT to add a domain to the Chrome Enterprise
+// blocklist. Returns Jira's create response ({ issueKey, _links: { web }, … }).
+function createJiraBlockIssue({ domain, category, count, requestedBy }) {
+  const fields = {
+    summary: `Block domain in Chrome Enterprise Policy: ${domain}`,
+    description:
+      `Please add the following site to the Chrome Enterprise blocklist (URLBlocklist).\n\n` +
+      `Domain: ${domain}\n` +
+      (category ? `Category: ${category}\n` : '') +
+      (count != null ? `Recent hits: ${count}\n` : '') +
+      (requestedBy ? `Requested by: ${requestedBy}\n` : '') +
+      `Raised automatically by web-monitor.`,
+  };
+  if (JIRA_IMPACT_ID)  fields.customfield_10004 = { id: JIRA_IMPACT_ID };
+  if (JIRA_URGENCY_ID) fields.customfield_10123 = { id: JIRA_URGENCY_ID };
+  if (JIRA_WORKSPACE_ID && JIRA_LOCATION_OBJECT_ID) {
+    fields.customfield_10307 = [{ workspaceId: JIRA_WORKSPACE_ID, id: `${JIRA_WORKSPACE_ID}:${JIRA_LOCATION_OBJECT_ID}`, objectId: JIRA_LOCATION_OBJECT_ID }];
+  }
+  if (JIRA_WORKSPACE_ID && JIRA_SITE_OBJECT_ID) {
+    fields.customfield_10308 = [{ workspaceId: JIRA_WORKSPACE_ID, id: `${JIRA_WORKSPACE_ID}:${JIRA_SITE_OBJECT_ID}`, objectId: JIRA_SITE_OBJECT_ID }];
+  }
+  return jiraRequest('POST', '/rest/servicedeskapi/request', {
+    serviceDeskId: JIRA_SERVICE_DESK_ID,
+    requestTypeId: JIRA_REQUEST_TYPE_ID,
+    requestFieldValues: fields,
+  });
+}
+
+// Given a list of issue keys we created, return only those already resolved
+// (statusCategory = Done). One JQL search scoped to our own keys — never scans
+// the whole Jira — so polling stays cheap regardless of site size.
+async function findResolvedJiraKeys(keys) {
+  if (!keys.length) return [];
+  const jql = `key in (${keys.join(',')}) AND statusCategory = Done`;
+  const apiPath = `/rest/api/3/search/jql?jql=${encodeURIComponent(jql)}&fields=status&maxResults=100`;
+  const data = await jiraRequest('GET', apiPath);
+  return (data.issues || []).map((i) => i.key);
+}
+
+// Poll the tickets we're still waiting on; flip resolved ones to 'done' so the
+// top-domains endpoint drops them. Only touches system-created, still-pending
+// tickets, and makes zero Jira calls when nothing is pending.
+async function pollJiraResolutions() {
+  try {
+    const rows = await dbAll(
+      `SELECT url, jira_key FROM block_requests WHERE status = 'pending' AND jira_key IS NOT NULL`);
+    if (!rows.length) return;
+    const urlByKey = new Map(rows.map((r) => [r.jira_key, r.url]));
+    const resolved = await findResolvedJiraKeys([...urlByKey.keys()]);
+    for (const key of resolved) {
+      const url = urlByKey.get(key);
+      if (!url) continue;
+      await dbRun(`UPDATE block_requests SET status = 'done', resolved_at = ? WHERE url = ?`,
+        [toMysqlDateTime(new Date().toISOString()), url]);
+      console.log(`[jira-poll] ${key} resolved → dropped ${url} from Top Offending Domains`);
+    }
+  } catch (e) {
+    console.warn('[jira-poll]', e.message);
+  }
+}
+
 // Middleware
 app.use(cors());
 app.use(express.json());
@@ -215,8 +336,9 @@ async function initSchema() {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
     // Block-request workflow for the Top Offending Domains table.
-    // Keyed by the normalized offending URL (host + path). status:
-    // 'pending' (Slack sent, awaiting blocklist) | 'done' (blocked → hidden from the list)
+    // Keyed by the offending host. status:
+    // 'pending' (Jira ticket raised, awaiting blocklist) | 'done' (ticket resolved → hidden from the list)
+    // jira_key is the Service Management issue key (e.g. WIT-123) the poller watches.
     `CREATE TABLE IF NOT EXISTS block_requests (
       url          VARCHAR(512) PRIMARY KEY,
       domain       VARCHAR(255),
@@ -224,14 +346,33 @@ async function initSchema() {
       status       VARCHAR(16) NOT NULL DEFAULT 'pending',
       requested_at DATETIME,
       requested_by VARCHAR(255),
-      resolved_at  DATETIME
+      resolved_at  DATETIME,
+      jira_key     VARCHAR(32)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
   ];
   for (const sql of statements) await pool.query(sql);
+
+  // Older databases already have block_requests without jira_key — add it.
+  const [jiraKeyCol] = await pool.query(
+    `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'block_requests' AND COLUMN_NAME = 'jira_key'`);
+  if (!jiraKeyCol.length) {
+    await pool.query(`ALTER TABLE block_requests ADD COLUMN jira_key VARCHAR(32)`);
+    console.log('[DB] Added block_requests.jira_key column.');
+  }
+
   console.log('Connected to the MySQL database.');
 }
 
 initSchema().catch((e) => console.error('[DB] Schema init failed:', e.message));
+
+// Watch open block-request tickets; resolved ones drop off Top Offending Domains.
+if (jiraConfigured) {
+  setInterval(pollJiraResolutions, JIRA_POLL_MS);
+  console.log(`[jira-poll] Watching block-request tickets every ${Math.round(JIRA_POLL_MS / 1000)}s.`);
+} else {
+  console.warn('[Jira] Not fully configured — "Request block" will return 503 until JIRA_* env vars are set.');
+}
 
 /**
  * Endpoint to receive logs from workstations
@@ -444,11 +585,19 @@ app.get('/api/enforcement/top-domains', async (req, res) => {
       if (!h.category && r.category) h.category = r.category;
     }
 
-    // Attach block status, drop anything already blocked ('done'), take top 10.
-    const brRows = await dbAll('SELECT url, status FROM block_requests');
-    const statusByHost = new Map((brRows || []).map(b => [b.url, b.status]));
+    // Attach block status + Jira ticket, drop anything resolved ('done'), take top 10.
+    const brRows = await dbAll('SELECT url, status, jira_key FROM block_requests');
+    const brByHost = new Map((brRows || []).map(b => [b.url, b]));
     const list = Array.from(hosts.values())
-      .map(h => ({ ...h, block_status: statusByHost.get(h.domain) || null }))
+      .map(h => {
+        const br = brByHost.get(h.domain);
+        return {
+          ...h,
+          block_status: br ? br.status : null,
+          jira_key: br ? br.jira_key : null,
+          jira_url: br && br.jira_key ? `${JIRA_BASE_URL}/browse/${br.jira_key}` : null,
+        };
+      })
       .filter(x => x.block_status !== 'done')
       .sort((a, b) => b.count - a.count)
       .slice(0, 10);
@@ -460,53 +609,51 @@ app.get('/api/enforcement/top-domains', async (req, res) => {
 });
 
 /**
- * Notify the team (via Slack) to block a domain in the Chrome Enterprise Policy.
- * Backs the "Request block" button on the Top Offending Domains table. This does
- * NOT change any policy itself — it sends a Slack message asking an admin to add
- * the domain to the Chrome Enterprise URLBlocklist.
+ * Raise a Jira Service Management ticket asking IT to block a domain in the
+ * Chrome Enterprise Policy. Backs the "Create Jira ticket" button on the Top
+ * Offending Domains table. This does NOT change any policy itself — it files a
+ * request; the domain drops off the table once that ticket is resolved in Jira
+ * (detected by the background poller).
  */
 app.post('/api/enforcement/request-block', async (req, res) => {
   const { url, domain, category, count, requestedBy } = req.body || {};
   const target = domain || url;   // block at the host level
   if (!target) return res.status(400).json({ error: 'Missing domain' });
-  if (!SLACK_BLOCK_WEBHOOK_URL) {
-    return res.status(503).json({ error: 'Slack webhook is not configured on the collector.' });
+  if (!jiraConfigured) {
+    return res.status(503).json({ error: 'Jira is not configured on the collector.' });
   }
 
-  const text =
-    `:no_entry: *Block request — Chrome Enterprise Policy*\n` +
-    `Please add the following site to the Chrome Enterprise blocklist (URLBlocklist):\n` +
-    `*Domain:* \`${target}\`\n` +
-    (category ? `*Category:* ${category}\n` : '') +
-    (count != null ? `*Recent hits:* ${count}\n` : '') +
-    (requestedBy ? `*Requested by:* ${requestedBy}\n` : '') +
-    `*Requested at:* ${new Date().toISOString()}`;
-
+  let issue;
   try {
-    await postSlackMessage(text, SLACK_BLOCK_WEBHOOK_URL);
+    issue = await createJiraBlockIssue({ domain: target, category, count, requestedBy });
   } catch (e) {
-    console.error('[request-block] Slack send failed:', e.message);
-    return res.status(502).json({ error: 'Failed to send Slack message.' });
+    console.error('[request-block] Jira create failed:', e.message);
+    return res.status(502).json({ error: 'Failed to create Jira ticket.' });
   }
 
-  // Slack delivered → mark the URL pending so it shows as such across reloads.
+  const jiraKey = issue.issueKey || null;
+  const jiraUrl = (issue._links && issue._links.web) ||
+                  (jiraKey ? `${JIRA_BASE_URL}/browse/${jiraKey}` : null);
+
+  // Ticket created → mark the host pending so it shows as such across reloads.
   const now = toMysqlDateTime(new Date().toISOString());
   try {
     await dbRun(`
-      INSERT INTO block_requests (url, domain, category, status, requested_at, requested_by, resolved_at)
-      VALUES (?, ?, ?, 'pending', ?, ?, NULL)
+      INSERT INTO block_requests (url, domain, category, status, requested_at, requested_by, resolved_at, jira_key)
+      VALUES (?, ?, ?, 'pending', ?, ?, NULL, ?)
       ON DUPLICATE KEY UPDATE
         domain       = VALUES(domain),
         category     = VALUES(category),
         status       = 'pending',
         requested_at = VALUES(requested_at),
         requested_by = VALUES(requested_by),
-        resolved_at  = NULL
-    `, [target, domain || null, category || null, now, requestedBy || null]);
-    res.json({ status: 'pending' });
+        resolved_at  = NULL,
+        jira_key     = VALUES(jira_key)
+    `, [target, domain || null, category || null, now, requestedBy || null, jiraKey]);
+    res.json({ status: 'pending', jira_key: jiraKey, jira_url: jiraUrl });
   } catch (err) {
     console.error('[request-block] DB error:', err.message);
-    res.status(500).json({ error: 'Slack sent, but failed to record pending status.' });
+    res.status(500).json({ error: 'Jira ticket created, but failed to record pending status.' });
   }
 });
 

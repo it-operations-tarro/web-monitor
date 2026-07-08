@@ -31,7 +31,7 @@ import {
   ChevronDown,
   ChevronLeft,
   Send,
-  Check,
+  ExternalLink,
   Loader2,
 } from 'lucide-react';
 import {
@@ -1589,11 +1589,11 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
   const [domRows, setDomRows] = useState<any[]>([]);
   const [domLoading, setDomLoading] = useState(false);
   const [domReloadTick, setDomReloadTick] = useState(0);
-  // Transient per-domain state while an action is in flight (persisted status
+  // Transient per-domain state while a request is in flight (persisted status
   // itself lives on each row as `block_status`: 'pending' | 'done' | null).
-  const [blockReq, setBlockReq] = useState<Record<string, 'sending' | 'resolving' | 'error'>>({});
-  // Which pending domain's dropdown menu is open (one at a time).
-  const [openMenu, setOpenMenu] = useState<string | null>(null);
+  // Resolution is driven by Jira: once the ticket is resolved, the collector's
+  // poller flips the row to 'done' and it drops off the list on next refetch.
+  const [blockReq, setBlockReq] = useState<Record<string, 'sending' | 'error'>>({});
 
   const requestBlock = async (d: any) => {
     setBlockReq(s => ({ ...s, [d.domain]: 'sending' }));
@@ -1604,21 +1604,6 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
         body: JSON.stringify({ domain: d.domain, category: d.category, count: d.count }),
       });
       if (res.ok) setDomReloadTick(t => t + 1);        // refetch → row shows persisted 'pending'
-      else setBlockReq(s => ({ ...s, [d.domain]: 'error' }));
-    } catch {
-      setBlockReq(s => ({ ...s, [d.domain]: 'error' }));
-    }
-  };
-
-  const markBlocked = async (d: any) => {
-    setBlockReq(s => ({ ...s, [d.domain]: 'resolving' }));
-    try {
-      const res = await fetch(`${getBaseUrl()}/api/enforcement/mark-blocked`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ domain: d.domain, category: d.category }),
-      });
-      if (res.ok) setDomReloadTick(t => t + 1);        // refetch → row drops off the list
       else setBlockReq(s => ({ ...s, [d.domain]: 'error' }));
     } catch {
       setBlockReq(s => ({ ...s, [d.domain]: 'error' }));
@@ -2079,41 +2064,36 @@ function EnforcementView({ data, getBaseUrl, onRefresh }: { data: any; getBaseUr
                         <Send size={11} /> Retry
                       </button>
                     ) : d.block_status === 'pending' ? (
-                      <div className="inline-flex flex-col items-end gap-1" onClick={(e) => e.stopPropagation()}>
-                        <button
-                          onClick={() => setOpenMenu(openMenu === d.domain ? null : d.domain)}
-                          disabled={reqState === 'resolving'}
-                          title="Block request pending — click to mark as done blocking"
-                          className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold border border-amber-500/40 text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 cursor-pointer transition-colors disabled:cursor-default disabled:opacity-60"
+                      d.jira_url ? (
+                        <a
+                          href={d.jira_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          title="Jira ticket open — resolve it in Jira to remove this domain from the list"
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold border border-amber-500/40 text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 cursor-pointer transition-colors"
                         >
-                          {reqState === 'resolving'
-                            ? <><Loader2 size={11} className="animate-spin" /> Updating…</>
-                            : <><Clock size={11} /> Pending <ChevronDown size={11} /></>}
-                        </button>
-                        {openMenu === d.domain && reqState !== 'resolving' && (
-                          <>
-                            <div className="fixed inset-0 z-10" onClick={() => setOpenMenu(null)} />
-                            <div className="relative z-20 min-w-[9rem] rounded-md border border-[var(--border-ui)] bg-[var(--bg-card)] shadow-lg py-1">
-                              <button
-                                onClick={() => { setOpenMenu(null); markBlocked(d); }}
-                                className="w-full flex items-center gap-1.5 px-3 py-1.5 text-left text-[11px] text-emerald-300 hover:bg-emerald-500/10 cursor-pointer transition-colors"
-                              >
-                                <Check size={12} /> Done blocking
-                              </button>
-                            </div>
-                          </>
-                        )}
-                      </div>
+                          <Clock size={11} /> {d.jira_key || 'Pending'} <ExternalLink size={10} />
+                        </a>
+                      ) : (
+                        <span
+                          onClick={(e) => e.stopPropagation()}
+                          title="Block request pending in Jira"
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold border border-amber-500/40 text-amber-300 bg-amber-500/10"
+                        >
+                          <Clock size={11} /> Pending
+                        </span>
+                      )
                     ) : (
                       <button
                         onClick={(e) => { e.stopPropagation(); requestBlock(d); }}
                         disabled={reqState === 'sending'}
-                        title="Send a Slack message requesting this domain be blocked in the Chrome Enterprise Policy"
+                        title="Create a Jira ticket requesting this domain be blocked in the Chrome Enterprise Policy"
                         className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold border border-[var(--border-ui)] text-[#c4b5fd] hover:bg-[#6a29e1]/10 cursor-pointer transition-colors disabled:cursor-default disabled:opacity-60"
                       >
                         {reqState === 'sending'
-                          ? <><Loader2 size={11} className="animate-spin" /> Sending…</>
-                          : <><Send size={11} /> Request block</>}
+                          ? <><Loader2 size={11} className="animate-spin" /> Creating…</>
+                          : <><Send size={11} /> Create Jira ticket</>}
                       </button>
                     )}
                   </td>
