@@ -186,6 +186,30 @@ function createJiraBlockIssue({ domain, category, count, requestedBy }) {
   });
 }
 
+// Create the Jira ticket AND record the pending block_request row. Shared by
+// the admin dashboard (/api/enforcement/request-block) and the team portal
+// (/api/portal/request-block). Returns { jiraKey, jiraUrl }.
+async function raiseBlockRequest({ target, domain, category, count, requestedBy }) {
+  const issue = await createJiraBlockIssue({ domain: target, category, count, requestedBy });
+  const jiraKey = issue.issueKey || null;
+  const jiraUrl = (issue._links && issue._links.web) ||
+                  (jiraKey ? `${JIRA_BASE_URL}/browse/${jiraKey}` : null);
+  const now = toMysqlDateTime(new Date().toISOString());
+  await dbRun(`
+    INSERT INTO block_requests (url, domain, category, status, requested_at, requested_by, resolved_at, jira_key)
+    VALUES (?, ?, ?, 'pending', ?, ?, NULL, ?)
+    ON DUPLICATE KEY UPDATE
+      domain       = VALUES(domain),
+      category     = VALUES(category),
+      status       = 'pending',
+      requested_at = VALUES(requested_at),
+      requested_by = VALUES(requested_by),
+      resolved_at  = NULL,
+      jira_key     = VALUES(jira_key)
+  `, [target, domain || null, category || null, now, requestedBy || null, jiraKey]);
+  return { jiraKey, jiraUrl };
+}
+
 // Given a list of issue keys we created, return only those already resolved
 // (statusCategory = Done). One JQL search scoped to our own keys — never scans
 // the whole Jira — so polling stays cheap regardless of site size.
@@ -623,37 +647,12 @@ app.post('/api/enforcement/request-block', async (req, res) => {
     return res.status(503).json({ error: 'Jira is not configured on the collector.' });
   }
 
-  let issue;
   try {
-    issue = await createJiraBlockIssue({ domain: target, category, count, requestedBy });
-  } catch (e) {
-    console.error('[request-block] Jira create failed:', e.message);
-    return res.status(502).json({ error: 'Failed to create Jira ticket.' });
-  }
-
-  const jiraKey = issue.issueKey || null;
-  const jiraUrl = (issue._links && issue._links.web) ||
-                  (jiraKey ? `${JIRA_BASE_URL}/browse/${jiraKey}` : null);
-
-  // Ticket created → mark the host pending so it shows as such across reloads.
-  const now = toMysqlDateTime(new Date().toISOString());
-  try {
-    await dbRun(`
-      INSERT INTO block_requests (url, domain, category, status, requested_at, requested_by, resolved_at, jira_key)
-      VALUES (?, ?, ?, 'pending', ?, ?, NULL, ?)
-      ON DUPLICATE KEY UPDATE
-        domain       = VALUES(domain),
-        category     = VALUES(category),
-        status       = 'pending',
-        requested_at = VALUES(requested_at),
-        requested_by = VALUES(requested_by),
-        resolved_at  = NULL,
-        jira_key     = VALUES(jira_key)
-    `, [target, domain || null, category || null, now, requestedBy || null, jiraKey]);
+    const { jiraKey, jiraUrl } = await raiseBlockRequest({ target, domain, category, count, requestedBy });
     res.json({ status: 'pending', jira_key: jiraKey, jira_url: jiraUrl });
-  } catch (err) {
-    console.error('[request-block] DB error:', err.message);
-    res.status(500).json({ error: 'Jira ticket created, but failed to record pending status.' });
+  } catch (e) {
+    console.error('[request-block] failed:', e.message);
+    return res.status(502).json({ error: 'Failed to create Jira ticket.' });
   }
 });
 
@@ -1386,6 +1385,90 @@ app.get('/api/portal/dashboard', requireAuth, async (req, res) => {
   } catch (e) {
     console.error('[PORTAL]', e);
     res.status(500).json({ error: 'Failed to fetch portal data' });
+  }
+});
+
+/**
+ * Team-scoped Top Offending Domains for the portal. Same shape as
+ * /api/enforcement/top-domains (domain, category, count, block_status, jira_*)
+ * but limited to the caller's assigned agents. from/to are optional ISO
+ * timestamps; defaults to the last 7 days.
+ */
+app.get('/api/portal/top-domains', requireAuth, async (req, res) => {
+  const { id, role } = req.portalUser;
+  const nowIso = new Date().toISOString();
+  const defaultFromIso = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const from = req.query.from || defaultFromIso;
+  const to   = req.query.to   || nowIso;
+
+  try {
+    const machineIds = await getMachineIdsForUser(id, role);
+    if (!machineIds.length) return res.json({ from, to, topOffendingDomains: [] });
+
+    const placeholders = machineIds.map(() => '?').join(',');
+    const rows = await dbAll(
+      `SELECT domain, category FROM logs
+       WHERE violation = 1 AND machine_id IN (${placeholders})
+         AND timestamp >= ? AND timestamp <= ?`,
+      [...machineIds, toMysqlDateTime(from), toMysqlDateTime(to)]
+    );
+
+    // Aggregate violation counts per host.
+    const hosts = new Map();
+    for (const r of rows || []) {
+      const host = (r.domain || '').toLowerCase();
+      if (!host) continue;
+      let h = hosts.get(host);
+      if (!h) { h = { domain: host, category: r.category, count: 0 }; hosts.set(host, h); }
+      h.count++;
+      if (!h.category && r.category) h.category = r.category;
+    }
+
+    // Attach block status + Jira ticket, drop resolved ('done'), take top 10.
+    const brRows = await dbAll('SELECT url, status, jira_key FROM block_requests');
+    const brByHost = new Map((brRows || []).map(b => [b.url, b]));
+    const list = Array.from(hosts.values())
+      .map(h => {
+        const br = brByHost.get(h.domain);
+        return {
+          ...h,
+          block_status: br ? br.status : null,
+          jira_key: br ? br.jira_key : null,
+          jira_url: br && br.jira_key ? `${JIRA_BASE_URL}/browse/${br.jira_key}` : null,
+        };
+      })
+      .filter(x => x.block_status !== 'done')
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
+    res.json({ from, to, topOffendingDomains: list });
+  } catch (e) {
+    console.error('[portal/top-domains]', e.message);
+    res.status(500).json({ error: 'Failed to load top offending domains' });
+  }
+});
+
+/**
+ * Portal block request — raises the same Jira ticket as the admin dashboard,
+ * but restricted to Managers and Directors (Team Leads see the table read-only).
+ */
+app.post('/api/portal/request-block', requireAuth, async (req, res) => {
+  const { role, name, username } = req.portalUser;
+  if (role !== 'manager' && role !== 'director') {
+    return res.status(403).json({ error: 'Only managers and directors can request blocks.' });
+  }
+  const { url, domain, category, count } = req.body || {};
+  const target = domain || url;
+  if (!target) return res.status(400).json({ error: 'Missing domain' });
+  if (!jiraConfigured) {
+    return res.status(503).json({ error: 'Jira is not configured on the collector.' });
+  }
+  try {
+    const requestedBy = `${name} (${username}, ${role})`;
+    const { jiraKey, jiraUrl } = await raiseBlockRequest({ target, domain, category, count, requestedBy });
+    res.json({ status: 'pending', jira_key: jiraKey, jira_url: jiraUrl });
+  } catch (e) {
+    console.error('[portal/request-block]', e.message);
+    res.status(502).json({ error: 'Failed to create Jira ticket.' });
   }
 });
 

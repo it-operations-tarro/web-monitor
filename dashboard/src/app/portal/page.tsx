@@ -25,6 +25,9 @@ import {
   ChevronDown,
   BarChart2,
   Clock,
+  Send,
+  Loader2,
+  ExternalLink,
 } from 'lucide-react';
 import {
   BarChart,
@@ -272,6 +275,22 @@ function PortalDashboard({ token, user, onLogout }: { token: string; user: any; 
   const LOG_PAGE_SIZE = 15;
   const AGENTS_PAGE_SIZE = 15;
 
+  /* Top Offending Domains (team-scoped) + block-request state */
+  // EST calendar day, YYYY-MM-DD, offset days back from today.
+  const estDayYMD = (offsetDays = 0) =>
+    new Date(Date.now() - 5 * 60 * 60 * 1000 - offsetDays * 86400000).toISOString().slice(0, 10);
+  // Only managers and directors may raise block requests; team leads are read-only.
+  const canBlock = user.role === 'manager' || user.role === 'director';
+  const [domRows, setDomRows]         = useState<any[]>([]);
+  const [domLoading, setDomLoading]   = useState(false);
+  const [domFrom, setDomFrom]         = useState(() => estDayYMD(7));
+  const [domTo, setDomTo]             = useState(() => estDayYMD(0));
+  const [domReloadTick, setDomReloadTick] = useState(0);
+  // Transient per-domain state while a request is in flight; the persisted
+  // status lives on each row as block_status ('pending'|'done'|null). Resolution
+  // is driven by Jira — the collector's poller drops resolved rows.
+  const [blockReq, setBlockReq]       = useState<Record<string, 'sending' | 'error'>>({});
+
   const getBaseUrl = () => `http://${window.location.hostname}:4448`;
 
   useEffect(() => {
@@ -308,6 +327,40 @@ function PortalDashboard({ token, user, onLogout }: { token: string; user: any; 
     const interval = setInterval(fetchData, 10000);
     return () => clearInterval(interval);
   }, [fetchData]);
+
+  /* ── Top Offending Domains (team-scoped) ── */
+  useEffect(() => {
+    // Picked dates are EST calendar days; map to absolute UTC instants.
+    const fromIso = new Date(`${domFrom}T00:00:00-05:00`).toISOString();
+    const toIso   = new Date(`${domTo}T23:59:59.999-05:00`).toISOString();
+    setDomLoading(true);
+    const ctrl = new AbortController();
+    fetch(`${getBaseUrl()}/api/portal/top-domains?from=${encodeURIComponent(fromIso)}&to=${encodeURIComponent(toIso)}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: 'no-store',
+      signal: ctrl.signal,
+    })
+      .then(r => r.json())
+      .then(d => { setDomRows(Array.isArray(d.topOffendingDomains) ? d.topOffendingDomains : []); setBlockReq({}); })
+      .catch(e => { if (e.name !== 'AbortError') setDomRows([]); })
+      .finally(() => setDomLoading(false));
+    return () => ctrl.abort();
+  }, [domFrom, domTo, domReloadTick, token]);
+
+  const requestBlock = async (d: any) => {
+    setBlockReq(s => ({ ...s, [d.domain]: 'sending' }));
+    try {
+      const res = await fetch(`${getBaseUrl()}/api/portal/request-block`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ domain: d.domain, category: d.category, count: d.count }),
+      });
+      if (res.ok) setDomReloadTick(t => t + 1);        // refetch → row shows persisted 'pending'
+      else setBlockReq(s => ({ ...s, [d.domain]: 'error' }));
+    } catch {
+      setBlockReq(s => ({ ...s, [d.domain]: 'error' }));
+    }
+  };
 
   /* ── Agent inspection helpers ── */
   const openInspect = async (agent: any) => {
@@ -1048,6 +1101,113 @@ function PortalDashboard({ token, user, onLogout }: { token: string; user: any; 
             </div>
           </Panel>
         </div>
+
+        {/* Top Offending Domains — team-scoped, with block requests (managers/directors) */}
+        <Panel>
+          <PanelHeader
+            accent="danger"
+            title="Top Offending Domains"
+            subtitle={canBlock
+              ? 'Most-flagged domains across your agents — resolve the Jira ticket to clear a row'
+              : 'Most-flagged domains across your agents'}
+          />
+          {/* Date-range filter — defaults to the last 7 days */}
+          <div className="flex flex-wrap items-center gap-1.5 px-4 py-2 border-b border-[var(--border-ui)] text-[11px]">
+            <Clock size={11} className="text-[var(--text-muted)] shrink-0" />
+            <span className="text-[var(--text-muted)]">From</span>
+            <input
+              type="date"
+              value={domFrom}
+              max={domTo}
+              onChange={e => e.target.value && setDomFrom(e.target.value)}
+              className="cursor-pointer bg-[var(--bg-page)] border border-[var(--border-ui)] rounded-md px-2 py-1 text-[11px] text-[var(--text-main)] focus:outline-none focus:border-[#6a29e1]/60 transition-colors"
+            />
+            <span className="text-[var(--text-muted)]">To</span>
+            <input
+              type="date"
+              value={domTo}
+              min={domFrom}
+              max={estDayYMD(0)}
+              onChange={e => e.target.value && setDomTo(e.target.value)}
+              className="cursor-pointer bg-[var(--bg-page)] border border-[var(--border-ui)] rounded-md px-2 py-1 text-[11px] text-[var(--text-main)] focus:outline-none focus:border-[#6a29e1]/60 transition-colors"
+            />
+            {(domFrom !== estDayYMD(7) || domTo !== estDayYMD(0)) && (
+              <button
+                onClick={() => { setDomFrom(estDayYMD(7)); setDomTo(estDayYMD(0)); }}
+                className="cursor-pointer px-1.5 py-1 rounded text-[10px] font-semibold text-[#c4b5fd] hover:bg-[#6a29e1]/10 transition-colors"
+              >
+                Last 7 days
+              </button>
+            )}
+            {domLoading && <span className="text-[var(--text-muted)] ml-auto">Loading…</span>}
+          </div>
+          <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-[var(--bg-card-alt)] border-b border-[var(--border-ui)]">
+                <th className={TH}>Domain</th>
+                <th className={TH}>Category</th>
+                <th className={`${TH} text-right`}>Hits</th>
+                <th className={`${TH} text-right`}>{canBlock ? 'Action' : 'Status'}</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[var(--border-ui)]">
+              {domRows.map((d: any) => {
+                const reqState = blockReq[d.domain];
+                return (
+                <tr key={d.domain} className="hover:bg-rose-500/10 transition-colors duration-150 group">
+                  <td className={TD}><span className="font-mono text-xs text-[var(--text-main)] group-hover:text-rose-300 transition-colors truncate">{d.domain}</span></td>
+                  <td className={TD}><CategoryTag category={d.category} /></td>
+                  <td className={`${TD} text-right`}><span className="text-rose-300 font-bold tabular-nums">{d.count}</span></td>
+                  <td className={`${TD} text-right`}>
+                    {d.block_status === 'pending' ? (
+                      d.jira_url ? (
+                        <a
+                          href={d.jira_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          title="Jira ticket open — resolve it in Jira to remove this domain from the list"
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold border border-amber-500/40 text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 cursor-pointer transition-colors"
+                        >
+                          <Clock size={11} /> {d.jira_key || 'Pending'} <ExternalLink size={10} />
+                        </a>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold border border-amber-500/40 text-amber-300 bg-amber-500/10">
+                          <Clock size={11} /> Pending
+                        </span>
+                      )
+                    ) : !canBlock ? (
+                      <span className="text-[11px] text-[var(--text-muted)]">—</span>
+                    ) : reqState === 'error' ? (
+                      <button
+                        onClick={() => requestBlock(d)}
+                        title="Retry — the last request failed"
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold border border-rose-500/50 text-rose-300 bg-rose-500/10 hover:bg-rose-500/20 cursor-pointer transition-colors"
+                      >
+                        <Send size={11} /> Retry
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => requestBlock(d)}
+                        disabled={reqState === 'sending'}
+                        title="Create a Jira ticket requesting this domain be blocked in the Chrome Enterprise Policy"
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold border border-[var(--border-ui)] text-[#c4b5fd] hover:bg-[#6a29e1]/10 cursor-pointer transition-colors disabled:cursor-default disabled:opacity-60"
+                      >
+                        {reqState === 'sending'
+                          ? <><Loader2 size={11} className="animate-spin" /> Creating…</>
+                          : <><Send size={11} /> Create Jira ticket</>}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              );})}
+              {domRows.length === 0 && !domLoading && (
+                <tr><td colSpan={4} className="px-4 py-8 text-center text-xs text-[var(--text-muted)] italic">No policy violations in this range.</td></tr>
+              )}
+            </tbody>
+          </table>
+          </div>
+        </Panel>
 
         {/* Bandwidth violations */}
         <Panel>
