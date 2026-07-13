@@ -7,6 +7,7 @@ const https = require('https');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const mysql = require('mysql2/promise');
+const { runArchive, listArchives, ARCHIVE_DIR, RETAIN_MONTHS } = require('./archive');
 
 // ─── Floor Map DB (MariaDB) connection pool ────────────────────────────────
 let floorMapDb = null;
@@ -439,7 +440,11 @@ app.post('/logs', async (req, res) => {
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `, [machine_id, username, domain, full_url, ts, violation ? 1 : 0, category]);
 
-    console.log(`[LOG] Recieved from ${machine_id}: ${domain} [Violation: ${violation ? 'YES' : 'NO'}]`);
+    // Per-request log — fires on every page visit from every agent, so it's the
+    // main source of stdout volume. Off by default; set LOG_REQUESTS=true to enable.
+    if (process.env.LOG_REQUESTS === 'true') {
+      console.log(`[LOG] Received from ${machine_id}: ${domain} [Violation: ${violation ? 'YES' : 'NO'}]`);
+    }
     if (violation) {
       sendSlackViolationNotification({ username, machine_id, domain, full_url, category, timestamp });
     }
@@ -1641,6 +1646,27 @@ app.get('/api/agents/:email/violations', async (req, res) => {
   }
 });
 
+// ─── Log archive admin (internal) ──────────────────────────────────────────
+// List the monthly archive files on disk (name, size, mtime). Use the file
+// names here with restore.js to reload a pruned month for traceback.
+app.get('/api/admin/archives', (req, res) => {
+  try {
+    res.json({ dir: ARCHIVE_DIR, retainMonths: RETAIN_MONTHS, files: listArchives() });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to list archives' });
+  }
+});
+
+// Trigger an archive+prune run now instead of waiting for the daily job.
+// Fire-and-forget: the run continues in the background and logs its progress.
+app.post('/api/admin/archives/run', (req, res) => {
+  if (process.env.ARCHIVE_ENABLED === 'false') {
+    return res.status(409).json({ error: 'Archiving is disabled (ARCHIVE_ENABLED=false).' });
+  }
+  runArchive(pool).catch((e) => console.error('[ARCHIVE] Manual run failed:', e.message));
+  res.status(202).json({ status: 'started' });
+});
+
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Collector API running on http://0.0.0.0:${PORT}`);
   console.log(`📂 Database: MySQL ${process.env.DB_NAME || 'web_monitor'}@${process.env.DB_HOST || 'localhost'}:${parseInt(process.env.DB_PORT) || 3306}`);
@@ -1648,6 +1674,19 @@ app.listen(PORT, '0.0.0.0', () => {
   // Initial sync and schedule daily sync (every 24 hours)
   syncBlacklists();
   setInterval(syncBlacklists, 24 * 60 * 60 * 1000);
+
+  // Archive+prune old logs so the DB doesn't grow forever. Each completed
+  // calendar month older than the retention window is written to a gzipped SQL
+  // file under archives/ (reloadable via restore.js) and only then deleted.
+  // Set ARCHIVE_ENABLED=false to disable, ARCHIVE_RETAIN_MONTHS to tune retention.
+  if (process.env.ARCHIVE_ENABLED === 'false') {
+    console.log('[ARCHIVE] Disabled (ARCHIVE_ENABLED=false).');
+  } else {
+    const archiveJob = () => runArchive(pool).catch((e) => console.error('[ARCHIVE] Job failed:', e.message));
+    setTimeout(archiveJob, 60 * 1000);                 // once, shortly after boot
+    setInterval(archiveJob, 24 * 60 * 60 * 1000);      // then daily
+    console.log(`[ARCHIVE] Enabled — keeping current month + ${RETAIN_MONTHS} completed month(s) live.`);
+  }
 });
 
 // --- Automated Blacklist Sync Engine ---

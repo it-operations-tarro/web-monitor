@@ -18,6 +18,16 @@ services:
       - ./collector/config.json:/app/config.json
       # Drop-in extension artifacts served at /updates without rebuilding
       - ./collector/updates:/app/updates
+      # Monthly log archives (gzipped SQL) — persisted so pruned months survive
+      # container rebuilds and can be reloaded with restore.js for traceback.
+      - ./collector/archives:/app/archives
+    # Cap container stdout/stderr on disk: ~50 MB rolling (5 × 10 MB) per service.
+    # Without this the default json-file driver grows unbounded and can fill the host.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:4448/api/stats"]
       interval: 30s
@@ -38,3 +48,9 @@ services:
       - HOSTNAME=0.0.0.0
     depends_on:
       - collector
+    # Same rolling cap as the collector (see note above).
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"

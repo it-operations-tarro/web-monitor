@@ -60,8 +60,50 @@ docker compose up -d --build         # rebuilds changed images, recreates contai
 
 Config/data are safe across rebuilds:
 - **DB** lives on the host, untouched by container rebuilds.
-- **`config.json`** and **`updates/`** are bind-mounted, so edits and new `.crx`
-  drops persist.
+- **`config.json`**, **`updates/`**, and **`archives/`** are bind-mounted, so
+  edits, new `.crx` drops, and log archives persist.
+
+## Log archiving & retention
+
+The `logs` and `bandwidth_violations` tables would otherwise grow forever. A
+daily job in the collector archives each completed calendar month older than the
+retention window into one gzipped SQL file under `collector/archives/`
+(e.g. `logs-2026-06.sql.gz`), verifies the file is fully written, and only then
+deletes those rows. Nothing is lost — an archived month can be reloaded any time.
+
+- **Runs** ~1 min after boot and every 24 h. Watch it: `docker compose logs -f collector | grep ARCHIVE`.
+- **Retention** (env, in `collector/.env`):
+  - `ARCHIVE_ENABLED=false` — turn the job off entirely.
+  - `ARCHIVE_RETAIN_MONTHS=1` — completed months kept live in addition to the
+    current month (default `1` ⇒ keep current + previous month, archive older).
+  - `ARCHIVE_DIR` — override the archive location (default `collector/archives`).
+- **List archives:** `curl http://localhost:4448/api/admin/archives`
+- **Run now:** `curl -X POST http://localhost:4448/api/admin/archives/run`
+- **Reload a month for traceback** (idempotent — uses `INSERT IGNORE`):
+  ```bash
+  # inside the collector container (or any host with the DB reachable):
+  docker compose exec collector node restore.js archives/logs-2026-06.sql.gz
+  # or with the mysql client:
+  gunzip -c collector/archives/logs-2026-06.sql.gz | mysql -u USER -p web_monitor
+  ```
+
+## Container log rotation
+
+The collector prints a line per request to stdout, which Docker captures to a
+`*-json.log` file. Both services set a rolling cap in `docker-compose.yml`
+(`json-file`, `max-size: 10m`, `max-file: 5` ⇒ ~50 MB per service) so those files
+can't fill the disk. Also:
+
+- `LOG_REQUESTS` (env, `collector/.env`) — the noisy per-request `[LOG] Received…`
+  line is **off by default**. Set `LOG_REQUESTS=true` to re-enable it for debugging.
+- Rotation applies to **new** output. To reclaim an already-huge log from before
+  this change, recreate the container: `docker compose up -d --force-recreate collector`.
+- **pm2** (if any service still runs under pm2 rather than Docker):
+  ```bash
+  pm2 install pm2-logrotate
+  pm2 set pm2-logrotate:max_size 10M
+  pm2 set pm2-logrotate:retain 5
+  ```
 
 ## Notes & gotchas
 

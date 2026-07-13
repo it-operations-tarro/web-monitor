@@ -11,3 +11,6 @@ collector/config.json
 # One-time SQLite→MySQL migration dump — contains real employee data, already
 # imported into the live DB. Kept local only; do not commit.
 collector/schema/data_export.sql
+
+# Monthly log archives (gzipped SQL) — real activity data, generated at runtime.
+collector/archives/
