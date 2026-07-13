@@ -12,7 +12,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 
 COPY --from=deps /app/node_modules ./node_modules
-COPY package.json server.js ./
+COPY package.json server.js archive.js restore.js ./
 # Default extension artifacts; the updates/ dir is bind-mounted at runtime so
 # new .crx builds can be dropped in without rebuilding the image.
 COPY updates ./updates
