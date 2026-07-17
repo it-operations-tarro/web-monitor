@@ -1,0 +1,55 @@
+# Single-container deployment: collector + dashboard in ONE image (see Dockerfile).
+# This is the migration-ready shape — one service, one published port (4447).
+#
+#   docker compose -f docker-compose.single.yml up -d --build
+#
+# Unlike the old docker-compose.yml this does NOT use network_mode: host, because
+# the database is no longer on localhost. Point DB_HOST/FLOOR_MAP_DB_HOST (in
+# collector/.env) at a reachable address:
+#   - AWS:   the RDS endpoint
+#   - local: host.docker.internal (resolves to the host on Docker Desktop) if the
+#            DB runs on your machine — extra_hosts below maps it on Linux too.
+services:
+  web-monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: web-monitor
+    container_name: web-monitor
+    restart: unless-stopped
+
+    # Only the dashboard is exposed. The collector (4448) stays internal to the
+    # container and is reached via the Next.js rewrites.
+    ports:
+      - "4447:4447"
+
+    # Secrets + DB config for the collector process (JWT_SECRET, DB_*,
+    # FLOOR_MAP_DB_*, SLACK_*, JIRA_*, ARCHIVE_*). PORTs are set per-process in
+    # ecosystem.config.js and are intentionally NOT taken from here.
+    env_file:
+      - ./collector/.env
+
+    # Runtime-mutable state the collector reads/writes. On Fargate these become
+    # an EFS mount instead.
+    volumes:
+      - ./collector/config.json:/app/collector/config.json
+      - ./collector/updates:/app/collector/updates
+      - ./collector/archives:/app/collector/archives
+
+    # Lets DB_HOST=host.docker.internal work on Linux (already works on Docker
+    # Desktop for Mac/Windows). Harmless if you point DB_HOST at RDS instead.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4447/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s

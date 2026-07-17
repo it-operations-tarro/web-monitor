@@ -149,7 +149,10 @@ function LoginForm({ onLogin }: { onLogin: (token: string, user: any) => void })
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const getBaseUrl = () => `http://${window.location.hostname}:4448`;
+  // Same-origin: the collector is reached through the Next.js rewrites in
+  // next.config.ts (/api, /logs, /ping, /updates -> in-container :4448), so the
+  // browser never needs a separate host/port. Empty base => relative URLs.
+  const getBaseUrl = () => '';
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -291,7 +294,10 @@ function PortalDashboard({ token, user, onLogout }: { token: string; user: any; 
   // is driven by Jira — the collector's poller drops resolved rows.
   const [blockReq, setBlockReq]       = useState<Record<string, 'sending' | 'error'>>({});
 
-  const getBaseUrl = () => `http://${window.location.hostname}:4448`;
+  // Same-origin: the collector is reached through the Next.js rewrites in
+  // next.config.ts (/api, /logs, /ping, /updates -> in-container :4448), so the
+  // browser never needs a separate host/port. Empty base => relative URLs.
+  const getBaseUrl = () => '';
 
   useEffect(() => {
     const saved = localStorage.getItem('tarro-theme') as 'light' | 'dark';
@@ -1272,7 +1278,10 @@ function ChangePasswordScreen({ token, user, onDone }: { token: string; user: an
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const getBaseUrl = () => `http://${window.location.hostname}:4448`;
+  // Same-origin: the collector is reached through the Next.js rewrites in
+  // next.config.ts (/api, /logs, /ping, /updates -> in-container :4448), so the
+  // browser never needs a separate host/port. Empty base => relative URLs.
+  const getBaseUrl = () => '';
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();

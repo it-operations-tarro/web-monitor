@@ -1,0 +1,30 @@
+# Build context hygiene for the single-container image (built from repo root).
+# Keep the context small and never ship secrets or local state into the image.
+
+# Dependencies / build output (reinstalled & rebuilt inside the image)
+**/node_modules
+dashboard/.next
+dashboard/tsconfig.tsbuildinfo
+
+# Secrets & runtime-mutable state (provided at runtime via env + volumes/EFS)
+collector/.env
+collector/config.json
+collector/archives
+collector/logs.db
+collector/logs.db-wal
+collector/logs.db-shm
+**/*.bak
+
+# VCS / tooling / large artifacts not needed to build
+.git
+.gitignore
+**/npm-debug.log
+extension-old.crx
+extension/*.crx
+*.pem
+slack-app-icon*.png
+slack-app-icon*.svg
+
+# The old per-service Dockerfiles are not used by the single-image build
+collector/Dockerfile
+dashboard/Dockerfile
