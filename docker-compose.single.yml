@@ -1,14 +1,16 @@
 # Single-container deployment: collector + dashboard in ONE image (see Dockerfile).
-# This is the migration-ready shape — one service, one published port (4447).
+# Collector (4448) + dashboard (4447) run under pm2 in one image.
 #
 #   docker compose -f docker-compose.single.yml up -d --build
 #
-# Unlike the old docker-compose.yml this does NOT use network_mode: host, because
-# the database is no longer on localhost. Point DB_HOST/FLOOR_MAP_DB_HOST (in
-# collector/.env) at a reachable address:
-#   - AWS:   the RDS endpoint
-#   - local: host.docker.internal (resolves to the host on Docker Desktop) if the
-#            DB runs on your machine — extra_hosts below maps it on Linux too.
+# This on-prem shape uses network_mode: host because (a) MySQL runs on the host,
+# so DB_HOST=localhost in collector/.env reaches it with no MySQL changes, and
+# (b) the already-deployed browser extensions post to this host on :4448 directly
+# (extension/api.js), which host networking keeps reachable. Requires a Linux host.
+#
+# For the AWS/Fargate shape instead: drop network_mode: host, publish 4447 only,
+# set DB_HOST/FLOOR_MAP_DB_HOST to the RDS endpoint, and repack the extension to
+# post same-origin through 4447 (the Next.js rewrites proxy /logs,/ping → 4448).
 services:
   web-monitor:
     build:
@@ -18,10 +20,15 @@ services:
     container_name: web-monitor
     restart: unless-stopped
 
-    # Only the dashboard is exposed. The collector (4448) stays internal to the
-    # container and is reached via the Next.js rewrites.
-    ports:
-      - "4447:4447"
+    # On-prem deployment server: MySQL runs on the host AND the already-deployed
+    # browser extensions post to this host on :4448 directly (extension/api.js).
+    # Host networking makes both work with zero MySQL changes — the container
+    # shares the host's network stack, so DB_HOST=localhost (from .env) reaches
+    # the host MySQL, and both 4447 (dashboard) and 4448 (collector) listen on
+    # the host. `ports:` is intentionally omitted (it is ignored under host
+    # networking). Requires a Linux host. For the AWS/bridge shape, use the
+    # published-port setup instead.
+    network_mode: host
 
     # Secrets + DB config for the collector process (JWT_SECRET, DB_*,
     # FLOOR_MAP_DB_*, SLACK_*, JIRA_*, ARCHIVE_*). PORTs are set per-process in
@@ -35,11 +42,6 @@ services:
       - ./collector/config.json:/app/collector/config.json
       - ./collector/updates:/app/collector/updates
       - ./collector/archives:/app/collector/archives
-
-    # Lets DB_HOST=host.docker.internal work on Linux (already works on Docker
-    # Desktop for Mac/Windows). Harmless if you point DB_HOST at RDS instead.
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
 
     logging:
       driver: json-file
