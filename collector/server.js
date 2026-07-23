@@ -1345,53 +1345,33 @@ async function emailsToMachineIds(emails) {
   return [...new Set(rows.map(r => r.machine_id))];
 }
 
+// Every agent email a portal user monitors: their OWN direct assignments plus,
+// recursively, everything monitored by their reports (user_assignments children).
+// This makes the hierarchy roll up cleanly at any depth:
+//   team_lead → own assigned agents
+//   manager   → own imported TL stations + each team lead's agents
+//   director  → own (if any) + each manager's full scope (their imported TL
+//               stations AND their team leads' agents)
+// The `seen` set guards against accidental assignment cycles.
+async function collectMonitoredEmails(userId, seen = new Set()) {
+  if (seen.has(userId)) return [];
+  seen.add(userId);
+
+  const emails = [];
+  const direct = await dbAll('SELECT agent_email FROM agent_assignments WHERE user_id = ?', [userId]);
+  emails.push(...direct.map(d => d.agent_email));
+
+  const children = await dbAll('SELECT child_id FROM user_assignments WHERE parent_id = ?', [userId]);
+  for (const c of children) {
+    emails.push(...await collectMonitoredEmails(c.child_id, seen));
+  }
+  return emails;
+}
+
 async function getMachineIdsForUser(userId, role) {
-  if (role === 'team_lead') {
-    const rows = await dbAll('SELECT agent_email FROM agent_assignments WHERE user_id = ?', [userId]);
-    return emailsToMachineIds(rows.map(r => r.agent_email));
-  }
-
-  if (role === 'manager') {
-    // (a) Roll-up: agents assigned to the Team Lead portal accounts under this manager
-    const tls = await dbAll('SELECT child_id FROM user_assignments WHERE parent_id = ?', [userId]);
-    let rollupEmails = [];
-    if (tls.length) {
-      const tlIds = tls.map(t => t.child_id);
-      const agents = await dbAll(
-        `SELECT agent_email FROM agent_assignments WHERE user_id IN (${tlIds.map(() => '?').join(',')})`,
-        tlIds
-      );
-      rollupEmails = agents.map(a => a.agent_email);
-    }
-    // (b) Direct: emails assigned to the manager itself — e.g. Team Lead stations
-    //     imported from the org directory via /org-team-leads. This is what lets
-    //     a manager monitor their TLs' own activity, not just the TLs' agents.
-    const direct = await dbAll('SELECT agent_email FROM agent_assignments WHERE user_id = ?', [userId]);
-    const directEmails = direct.map(d => d.agent_email);
-
-    const allEmails = [...new Set([...rollupEmails, ...directEmails])];
-    if (!allEmails.length) return [];
-    return emailsToMachineIds(allEmails);
-  }
-
-  if (role === 'director') {
-    const managers = await dbAll('SELECT child_id FROM user_assignments WHERE parent_id = ?', [userId]);
-    if (!managers.length) return [];
-    const managerIds = managers.map(m => m.child_id);
-    const tls = await dbAll(
-      `SELECT child_id FROM user_assignments WHERE parent_id IN (${managerIds.map(() => '?').join(',')})`,
-      managerIds
-    );
-    if (!tls.length) return [];
-    const tlIds = tls.map(t => t.child_id);
-    const agents = await dbAll(
-      `SELECT agent_email FROM agent_assignments WHERE user_id IN (${tlIds.map(() => '?').join(',')})`,
-      tlIds
-    );
-    return emailsToMachineIds([...new Set(agents.map(a => a.agent_email))]);
-  }
-
-  return [];
+  // `role` is accepted for call-site compatibility; scope is derived structurally.
+  const emails = [...new Set(await collectMonitoredEmails(userId))];
+  return emailsToMachineIds(emails);
 }
 
 app.get('/api/portal/dashboard', requireAuth, async (req, res) => {
