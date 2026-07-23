@@ -127,6 +127,17 @@ Write-Step "[ 2/7 ] Setting up install directory..."
 
 New-Item -ItemType Directory -Path $INSTALL_DIR -Force | Out-Null
 
+# Unlock files locked by a previous run. The step-7 ACL applies a Deny
+# Write/Delete for 'Users', and because an admin account is also a member of
+# 'Users', that Deny blocks the overwrite below (Access denied). Resetting the
+# ACL restores inherited permissions so the copy succeeds. Owner/Administrator
+# can always change an ACL, so this works even while the Deny is in effect.
+# Mirrors the 'chattr -i' unlock preflight in the Linux setup script.
+if (Test-Path $INSTALL_DIR) {
+    icacls "$INSTALL_DIR" /reset /T /C /Q 2>&1 | Out-Null
+    Write-OK "Reset ACLs on $INSTALL_DIR (unlocked prior-run files)"
+}
+
 $crxDest = Join-Path $INSTALL_DIR "extension.crx"
 Copy-Item -Path $CrxPath -Destination $crxDest -Force
 Write-OK "CRX copied to $crxDest"
@@ -212,13 +223,32 @@ $serverSettings = New-ScheduledTaskSettingsSet `
     -RestartInterval             (New-TimeSpan -Minutes 1) `
     -StartWhenAvailable
 
+# Run as SYSTEM. A standard-user account cannot bind the HttpListener port
+# (HttpListener.Start throws 'Access is denied'), so the task would launch and
+# immediately crash back to 'Ready' -- the loopback server never comes up and
+# Chrome has nothing to fetch the CRX from. SYSTEM can always bind loopback and
+# runs at boot before any user logs in; loopback is machine-wide, so the user's
+# Chrome still reaches it. -RunLevel now lives on the principal, not Register.
+$serverPrincipal = New-ScheduledTaskPrincipal `
+    -UserId    "NT AUTHORITY\SYSTEM" `
+    -LogonType ServiceAccount `
+    -RunLevel  Highest
+
 Register-ScheduledTask `
-    -TaskName $serverTask `
-    -Action   $serverAction `
-    -Trigger  $serverTrigger `
-    -Settings $serverSettings `
-    -RunLevel Highest `
+    -TaskName  $serverTask `
+    -Action    $serverAction `
+    -Trigger   $serverTrigger `
+    -Settings  $serverSettings `
+    -Principal $serverPrincipal `
     -Force | Out-Null
+
+# Reserve the loopback URL so the HttpListener can bind regardless of the
+# account the task runs under. Belt-and-suspenders alongside the SYSTEM
+# principal above. Delete any prior reservation first so re-runs stay
+# idempotent (netsh is a native command; a non-zero exit won't throw here).
+netsh http delete urlacl url=http://127.0.0.1:$SERVER_PORT/ 2>&1 | Out-Null
+netsh http add urlacl url=http://127.0.0.1:$SERVER_PORT/ user=Everyone 2>&1 | Out-Null
+Write-OK "URL reservation set for http://127.0.0.1:$SERVER_PORT/"
 
 Start-ScheduledTask -TaskName $serverTask
 Start-Sleep -Seconds 3   # give the listener time to bind
@@ -332,12 +362,21 @@ $wdSettings = New-ScheduledTaskSettingsSet `
     -ExecutionTimeLimit (New-TimeSpan -Minutes 2) `
     -StartWhenAvailable
 
+# Run as SYSTEM. The watchdog restores keys under HKLM\SOFTWARE\Policies, which
+# a standard-user account cannot write -- under the interactive user the restore
+# would silently fail on those machines. SYSTEM has full HKLM write and can
+# start the server task. -RunLevel now lives on the principal, not Register.
+$wdPrincipal = New-ScheduledTaskPrincipal `
+    -UserId    "NT AUTHORITY\SYSTEM" `
+    -LogonType ServiceAccount `
+    -RunLevel  Highest
+
 Register-ScheduledTask `
-    -TaskName $watchdogTask `
-    -Action   $wdAction `
-    -Trigger  $wdTriggers `
-    -Settings $wdSettings `
-    -RunLevel Highest `
+    -TaskName  $watchdogTask `
+    -Action    $wdAction `
+    -Trigger   $wdTriggers `
+    -Settings  $wdSettings `
+    -Principal $wdPrincipal `
     -Force | Out-Null
 
 Start-ScheduledTask -TaskName $watchdogTask

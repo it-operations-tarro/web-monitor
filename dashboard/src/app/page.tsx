@@ -2680,16 +2680,24 @@ function OrgImportButton({
   existing,
   getBaseUrl,
   onImported,
+  endpoint = 'org-reports',
+  title = 'Import from Org Directory',
+  subtitle = 'Full-Time employees reporting to this Team Lead in the employee database',
+  buttonLabel = 'Import from Org',
 }: {
   userId: number;
   existing: string[];
   getBaseUrl: () => string;
   onImported: () => void;
+  endpoint?: string;
+  title?: string;
+  subtitle?: string;
+  buttonLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [result, setResult] = useState<{ tlFullName: string; employees: any[] } | null>(null);
+  const [result, setResult] = useState<{ fullName: string; employees: any[] } | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [assigning, setAssigning] = useState(false);
 
@@ -2699,10 +2707,11 @@ function OrgImportButton({
     setResult(null);
     setSelected(new Set());
     try {
-      const res = await fetch(`${getBaseUrl()}/api/users/${userId}/org-reports`);
+      const res = await fetch(`${getBaseUrl()}/api/users/${userId}/${endpoint}`);
       const data = await res.json();
       if (!res.ok) { setError(data.error || `Error ${res.status}`); return; }
-      setResult(data);
+      // Normalize: the TL endpoint returns tlFullName, the manager endpoint managerFullName
+      setResult({ fullName: data.tlFullName ?? data.managerFullName ?? data.fullName ?? '', employees: data.employees || [] });
       // Pre-select all that are not already assigned
       const newOnes = new Set<string>(data.employees.map((e: any) => e.work_email).filter((e: string) => !existing.includes(e)));
       setSelected(newOnes);
@@ -2755,7 +2764,7 @@ function OrgImportButton({
         title="Import direct reports from employee directory"
       >
         <Users size={12} />
-        Import from Org
+        {buttonLabel}
       </button>
 
       {open && (
@@ -2764,9 +2773,9 @@ function OrgImportButton({
             {/* Header */}
             <div className="px-6 py-4 border-b border-[var(--border-ui)] flex items-center justify-between shrink-0">
               <div>
-                <h3 className="text-base font-bold text-[var(--text-main)] tracking-tight">Import from Org Directory</h3>
+                <h3 className="text-base font-bold text-[var(--text-main)] tracking-tight">{title}</h3>
                 <p className="text-xs text-[var(--text-muted)] mt-0.5">
-                  Full-Time employees reporting to this Team Lead in the employee database
+                  {subtitle}
                 </p>
               </div>
               <button onClick={close} aria-label="Close" className="cursor-pointer p-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--bg-card-alt)] transition-colors">
@@ -2794,7 +2803,7 @@ function OrgImportButton({
                   {/* Summary bar */}
                   <div className="px-6 py-3 bg-[var(--bg-card-alt)]/60 border-b border-[var(--border-ui)] flex items-center justify-between">
                     <div className="text-xs text-[var(--text-muted)]">
-                      Reporting to <span className="text-[var(--text-main)] font-semibold">{result.tlFullName}</span>
+                      Reporting to <span className="text-[var(--text-main)] font-semibold">{result.fullName}</span>
                       {' · '}
                       <span className="text-emerald-300 font-semibold">{result.employees.length}</span> Full-Time employee{result.employees.length !== 1 ? 's' : ''} found
                       {existing.length > 0 && ` · ${result.employees.filter(e => existing.includes(e.work_email)).length} already assigned`}
@@ -2808,7 +2817,7 @@ function OrgImportButton({
 
                   {result.employees.length === 0 ? (
                     <div className="py-12 text-center text-sm text-[var(--text-muted)] italic">
-                      No Full-Time employees found reporting to this Team Lead.
+                      No Full-Time employees found reporting to {result.fullName || 'this account'}.
                     </div>
                   ) : (
                     <div className="divide-y divide-[var(--border-ui)]">
@@ -2953,6 +2962,8 @@ function UserManagementTab({ getBaseUrl }: { getBaseUrl: () => string }) {
       await refreshAgents(user.id);
     } else {
       await refreshReports(user.id);
+      // Managers also carry directly-monitored emails (imported Team Lead stations)
+      if (user.role === 'manager') await refreshAgents(user.id);
     }
   };
 
@@ -3240,6 +3251,50 @@ function UserManagementTab({ getBaseUrl }: { getBaseUrl: () => string }) {
                               Assign
                             </button>
                           </div>
+
+                          {user.role === 'manager' && (
+                            <div className="mt-5 pt-4 border-t border-[var(--border-ui)]">
+                              <div className="flex items-center justify-between mb-2">
+                                <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+                                  Monitored Team Lead Stations
+                                </p>
+                                <OrgImportButton
+                                  userId={user.id}
+                                  existing={userAgents[user.id] || []}
+                                  getBaseUrl={getBaseUrl}
+                                  endpoint="org-team-leads"
+                                  title="Import Team Leads from Org Directory"
+                                  subtitle="Full-Time employees reporting to this Manager in the employee database"
+                                  buttonLabel="Import Team Leads"
+                                  onImported={async () => { await refreshAgents(user.id); fetchUsers(); }}
+                                />
+                              </div>
+                              <p className="text-[11px] text-[var(--text-muted)] mb-2 leading-relaxed">
+                                Emails this manager monitors directly — the Team Leads&apos; own stations. Separate from the assigned Team Lead logins above.
+                              </p>
+                              <div className="flex flex-wrap gap-1.5 mb-3">
+                                {(userAgents[user.id] || []).map((email: string) => (
+                                  <span key={email} className="flex items-center gap-1 px-2 py-0.5 bg-[var(--bg-card)] border border-[var(--border-ui)] rounded text-[11px] font-mono text-[var(--text-main)]">
+                                    {email}
+                                    <button onClick={() => unassignAgent(user.id, email)} className="ml-1 text-[var(--text-muted)] hover:text-rose-300">
+                                      <X size={11} />
+                                    </button>
+                                  </span>
+                                ))}
+                                {!(userAgents[user.id]?.length) && <span className="text-xs text-[var(--text-muted)] italic">No Team Lead stations monitored directly.</span>}
+                              </div>
+                              <BulkEmailInput
+                                existing={userAgents[user.id] || []}
+                                onAssign={async (emails) => {
+                                  await fetch(`${getBaseUrl()}/api/users/${user.id}/agents/bulk`, {
+                                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ emails }),
+                                  });
+                                  await refreshAgents(user.id);
+                                  fetchUsers();
+                                }}
+                              />
+                            </div>
+                          )}
                         </div>
                       )}
                         </div>

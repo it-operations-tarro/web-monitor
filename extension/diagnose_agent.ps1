@@ -9,7 +9,7 @@
 #>
 
 # ── Match these to setup_agent.ps1 ───────────────────────────────────────────
-$EXTENSION_ID = "kebeiiilealdhfnidokhogjbgpmipflj"
+$EXTENSION_ID = "depibabflipmjimimdboikfhgdelcdnp"
 $INSTALL_DIR  = "C:\chrome-extensions"
 $SERVER_PORT  = 8765
 # ─────────────────────────────────────────────────────────────────────────────

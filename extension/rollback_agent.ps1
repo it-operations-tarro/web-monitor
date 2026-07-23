@@ -18,6 +18,7 @@ $ErrorActionPreference = 'SilentlyContinue'
 # Edit to match setup_agent.ps1 if you changed these
 $EXTENSION_ID = "depibabflipmjimimdboikfhgdelcdnp"
 $INSTALL_DIR  = "C:\chrome-extensions"
+$SERVER_PORT  = 8765
 
 function Write-Step { param($msg) Write-Host "`n$msg" -ForegroundColor Cyan }
 function Write-OK   { param($msg) Write-Host "  OK  $msg" -ForegroundColor Green }
@@ -41,6 +42,10 @@ foreach ($name in @("ChromeExtServer", "ChromeExtWatchdog")) {
     Write-OK "Removed task: $name"
 }
 
+Write-Step "Removing URL reservation..."
+netsh http delete urlacl url=http://127.0.0.1:$SERVER_PORT/ 2>&1 | Out-Null
+Write-OK "Removed URL reservation for http://127.0.0.1:$SERVER_PORT/"
+
 Write-Step "Removing Chrome policy registry keys..."
 $paths = @(
     "HKLM:\SOFTWARE\Policies\Google\Chrome\ExtensionInstallForcelist",
@@ -58,14 +63,11 @@ foreach ($p in $paths) {
 
 Write-Step "Removing install directory..."
 if (Test-Path $INSTALL_DIR) {
-    # Strip deny ACLs so we can delete the files
-    Get-ChildItem -Path $INSTALL_DIR -File | ForEach-Object {
-        try {
-            $acl = Get-Acl $_.FullName
-            $acl.SetAccessRuleProtection($false, $true)
-            Set-Acl -Path $_.FullName -AclObject $acl
-        } catch {}
-    }
+    # Strip the deny ACLs so we can delete the files. Re-enabling inheritance
+    # alone does NOT remove the explicit Deny ACE (and Deny beats the inherited
+    # Allow), so the delete would still fail. icacls /reset drops the explicit
+    # ACEs and restores inherited permissions, which lets Remove-Item proceed.
+    icacls "$INSTALL_DIR" /reset /T /C /Q 2>&1 | Out-Null
     Remove-Item -Path $INSTALL_DIR -Recurse -Force -ErrorAction SilentlyContinue
     Write-OK "Removed $INSTALL_DIR"
 } else {

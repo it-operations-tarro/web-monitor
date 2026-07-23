@@ -1217,6 +1217,82 @@ app.get('/api/users/:id/org-reports', async (req, res) => {
   }
 });
 
+// Import Team Leads from the org directory for a Manager.
+// Mirror of /org-reports one level up: looks up the Manager's work email in
+// floor_map_db, finds their Full-Time direct reports (the Team Leads), and
+// returns them so they can be bulk-assigned as directly-monitored agents on
+// the Manager account (see the manager branch of getMachineIdsForUser).
+app.get('/api/users/:id/org-team-leads', async (req, res) => {
+  try {
+    const mgrUser = await dbGet('SELECT username, email, role FROM portal_users WHERE id = ?', [req.params.id]);
+    if (!mgrUser) return res.status(404).json({ error: 'User not found' });
+    if (mgrUser.role !== 'manager') return res.status(400).json({ error: 'Only Managers can import team leads' });
+
+    const mgrEmail = (mgrUser.email || mgrUser.username || '').toLowerCase().trim();
+    if (!mgrEmail) return res.status(400).json({ error: 'Manager has no email set' });
+
+    const db = await getFloorMapDb();
+    if (!db) return res.status(503).json({ error: 'Cannot connect to employee directory. Check FLOOR_MAP_DB_* settings in .env' });
+
+    // Resolve the Manager's full name from the org directory by work email
+    const [mgrRows] = await db.query(
+      `SELECT JSON_UNQUOTE(JSON_EXTRACT(attributes, '$."First Name"')) AS first_name,
+              JSON_UNQUOTE(JSON_EXTRACT(attributes, '$."Last Name"'))  AS last_name
+       FROM jira_schema8_objects
+       WHERE LOWER(JSON_UNQUOTE(JSON_EXTRACT(attributes, '$."Work Email"'))) = ?
+       LIMIT 1`,
+      [mgrEmail]
+    );
+
+    if (!mgrRows.length) {
+      return res.status(404).json({
+        error: `No employee record found for email "${mgrEmail}" in the org directory. Make sure the Manager's email matches their work email in the employee database.`
+      });
+    }
+
+    const mgrFullName = `${mgrRows[0].first_name || ''} ${mgrRows[0].last_name || ''}`.trim();
+    if (!mgrFullName) return res.status(404).json({ error: 'Could not determine Manager full name from org directory' });
+
+    // All Full-Time employees reporting to this Manager (their Team Leads)
+    const [empRows] = await db.query(
+      `SELECT JSON_UNQUOTE(JSON_EXTRACT(attributes, '$."Work Email"'))  AS work_email,
+              JSON_UNQUOTE(JSON_EXTRACT(attributes, '$."First Name"'))  AS first_name,
+              JSON_UNQUOTE(JSON_EXTRACT(attributes, '$."Last Name"'))   AS last_name,
+              JSON_UNQUOTE(JSON_EXTRACT(attributes, '$."Job Title"'))   AS job_title,
+              JSON_UNQUOTE(JSON_EXTRACT(attributes, '$."Department"'))  AS department
+       FROM jira_schema8_objects
+       WHERE JSON_UNQUOTE(JSON_EXTRACT(attributes, '$."Reporting to"'))      = ?
+         AND JSON_UNQUOTE(JSON_EXTRACT(attributes, '$."Employment Status"')) = 'Full-Time'
+         AND JSON_UNQUOTE(JSON_EXTRACT(attributes, '$."Work Email"')) IS NOT NULL
+         AND JSON_UNQUOTE(JSON_EXTRACT(attributes, '$."Work Email"')) != 'null'
+         AND JSON_UNQUOTE(JSON_EXTRACT(attributes, '$."Work Email"')) != ''
+       ORDER BY last_name, first_name`,
+      [mgrFullName]
+    );
+
+    // Dedupe by work email (directory can hold multiple rows per person)
+    const seen = new Set();
+    const employees = empRows
+      .map(r => ({
+        work_email:  (r.work_email || '').toLowerCase().trim(),
+        first_name:  r.first_name  || '',
+        last_name:   r.last_name   || '',
+        job_title:   r.job_title   || '',
+        department:  r.department  || '',
+      }))
+      .filter(r => {
+        if (!r.work_email || seen.has(r.work_email)) return false;
+        seen.add(r.work_email);
+        return true;
+      });
+
+    res.json({ managerFullName: mgrFullName, employees });
+  } catch (e) {
+    console.error('[OrgTeamLeadImport]', e.message);
+    res.status(500).json({ error: `Org directory query failed: ${e.message}` });
+  }
+});
+
 // Assign/unassign direct reports (TL→manager, manager→director)
 app.post('/api/users/:id/reports', async (req, res) => {
   const { child_id } = req.body;
@@ -1271,14 +1347,26 @@ async function getMachineIdsForUser(userId, role) {
   }
 
   if (role === 'manager') {
+    // (a) Roll-up: agents assigned to the Team Lead portal accounts under this manager
     const tls = await dbAll('SELECT child_id FROM user_assignments WHERE parent_id = ?', [userId]);
-    if (!tls.length) return [];
-    const tlIds = tls.map(t => t.child_id);
-    const agents = await dbAll(
-      `SELECT agent_email FROM agent_assignments WHERE user_id IN (${tlIds.map(() => '?').join(',')})`,
-      tlIds
-    );
-    return emailsToMachineIds([...new Set(agents.map(a => a.agent_email))]);
+    let rollupEmails = [];
+    if (tls.length) {
+      const tlIds = tls.map(t => t.child_id);
+      const agents = await dbAll(
+        `SELECT agent_email FROM agent_assignments WHERE user_id IN (${tlIds.map(() => '?').join(',')})`,
+        tlIds
+      );
+      rollupEmails = agents.map(a => a.agent_email);
+    }
+    // (b) Direct: emails assigned to the manager itself — e.g. Team Lead stations
+    //     imported from the org directory via /org-team-leads. This is what lets
+    //     a manager monitor their TLs' own activity, not just the TLs' agents.
+    const direct = await dbAll('SELECT agent_email FROM agent_assignments WHERE user_id = ?', [userId]);
+    const directEmails = direct.map(d => d.agent_email);
+
+    const allEmails = [...new Set([...rollupEmails, ...directEmails])];
+    if (!allEmails.length) return [];
+    return emailsToMachineIds(allEmails);
   }
 
   if (role === 'director') {
