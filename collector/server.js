@@ -1040,12 +1040,10 @@ app.get('/api/users', async (req, res) => {
         const r = await dbGet('SELECT COUNT(*) as cnt FROM agent_assignments WHERE user_id = ?', [u.id]);
         u.assignedCount = r?.cnt || 0;
       } else if (u.role === 'manager') {
-        // Team-lead portal children PLUS directly-monitored TL station emails
-        // (imported via /org-team-leads). Without the second term a manager who
-        // only imported TL stations would show 0 here.
-        const tl     = await dbGet('SELECT COUNT(*) as cnt FROM user_assignments WHERE parent_id = ?', [u.id]);
-        const direct = await dbGet('SELECT COUNT(*) as cnt FROM agent_assignments WHERE user_id = ?', [u.id]);
-        u.assignedCount = (tl?.cnt || 0) + (direct?.cnt || 0);
+        // Count only directly-monitored TL station emails (imported via
+        // /org-team-leads), not team-lead portal children.
+        const r = await dbGet('SELECT COUNT(*) as cnt FROM agent_assignments WHERE user_id = ?', [u.id]);
+        u.assignedCount = r?.cnt || 0;
       } else {
         const r = await dbGet('SELECT COUNT(*) as cnt FROM user_assignments WHERE parent_id = ?', [u.id]);
         u.assignedCount = r?.cnt || 0;
