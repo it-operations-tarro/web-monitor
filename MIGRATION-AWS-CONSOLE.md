@@ -113,7 +113,7 @@ mysql -h <RDS_ENDPOINT> -u <DB_USER> -p floor_map_db < floor_map_db.sql
 
 # --- seed EFS ---
 sudo mkdir -p /mnt/efs
-sudo mount -t efs -o tls,accesspoint=<fsap-ID> <fs-ID>:/ /mnt/efs
+sudo mount -t efs -o tls,accesspoint=fsap-04eac761df9e264dc fs-00b5f5ff29ebae05a:/ /mnt/efs
 sudo cp config.json   /mnt/efs/config.json         # the 5.9 MB enforcement config
 sudo cp -r updates     /mnt/efs/updates
 sudo mkdir -p /mnt/efs/archives
@@ -183,8 +183,8 @@ Console: **IAM → Roles → Create role → AWS service → Elastic Container S
     - `UPDATES_DIR=/data/updates`
     - `ARCHIVE_DIR=/data/archives`
   - Health check (optional): `CMD-SHELL, wget -qO- http://localhost:4447/ || exit 1`.
-- **Storage → Add volume:** type **EFS**, file system `<fs-ID>`, access point
-  `<fsap-ID>`, transit encryption **on**. **Mount point:** container path
+- **Storage → Add volume:** type **EFS**, file system `fs-00b5f5ff29ebae05a`, access point
+  `fsap-04eac761df9e264dc`, transit encryption **on**. **Mount point:** container path
   **`/data`**, source = that volume. (Do NOT mount at `/app/collector` — that hides
   server.js/node_modules.) Create.
 

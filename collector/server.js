@@ -14,6 +14,11 @@ const { runArchive, listArchives, ARCHIVE_DIR, RETAIN_MONTHS } = require('./arch
 // containerized deployments where the app code dir is read-only/ephemeral.
 const CONFIG_PATH = process.env.CONFIG_PATH || path.join(__dirname, 'config.json');
 
+// Enable TLS on the DB connections when DB_SSL=true. Managed MySQL/MariaDB
+// (e.g. RDS with require_secure_transport=ON) refuses plaintext connections.
+// Left off by default so a local/on-prem server without TLS is unaffected.
+const DB_SSL = process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : undefined;
+
 // ─── Floor Map DB (MariaDB) connection pool ────────────────────────────────
 let floorMapDb = null;
 
@@ -28,6 +33,7 @@ async function getFloorMapDb() {
       database: process.env.FLOOR_MAP_DB_NAME || 'floor_map_db_staging',
       waitForConnections: true,
       connectionLimit: 5,
+      ssl: DB_SSL,
     });
     console.log('[FloorMapDB] Connected to MariaDB employee directory.');
   } catch (e) {
@@ -285,6 +291,7 @@ const pool = mysql.createPool({
   // Stored timestamps are UTC; interpret returned DATETIMEs as UTC so they
   // serialize back to the same instant (…T…Z) the dashboard expects.
   timezone: 'Z',
+  ssl: DB_SSL,
 });
 
 // Normalize an ISO-8601 timestamp (…T…Z, with milliseconds) to a MySQL DATETIME
