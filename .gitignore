@@ -14,3 +14,7 @@ collector/schema/data_export.sql
 
 # Monthly log archives (gzipped SQL) — real activity data, generated at runtime.
 collector/archives/
+
+# AWS CLI installer artifacts
+aws/
+awscliv2.zip

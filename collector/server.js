@@ -9,6 +9,11 @@ const jwt = require('jsonwebtoken');
 const mysql = require('mysql2/promise');
 const { runArchive, listArchives, ARCHIVE_DIR, RETAIN_MONTHS } = require('./archive');
 
+// Mutable runtime paths. Default to alongside the code (on-prem/local), but are
+// overridable so they can live on a persistent mount (e.g. EFS at /data) in
+// containerized deployments where the app code dir is read-only/ephemeral.
+const CONFIG_PATH = process.env.CONFIG_PATH || path.join(__dirname, 'config.json');
+
 // ─── Floor Map DB (MariaDB) connection pool ────────────────────────────────
 let floorMapDb = null;
 
@@ -252,7 +257,7 @@ app.use(express.json());
 // Serves the update manifest Chrome polls and the packed .crx.
 // Chrome REQUIRES HTTPS for these URLs in ExtensionInstallForcelist —
 // terminate TLS at a reverse proxy or run this server behind one.
-const updatesDir = path.join(__dirname, 'updates');
+const updatesDir = process.env.UPDATES_DIR || path.join(__dirname, 'updates');
 if (!fs.existsSync(updatesDir)) fs.mkdirSync(updatesDir, { recursive: true });
 app.use('/updates', express.static(updatesDir, {
   setHeaders: (res, filePath) => {
@@ -415,7 +420,7 @@ app.post('/logs', async (req, res) => {
   let category = null;
   if (violation) {
     try {
-      const configPath = path.join(__dirname, 'config.json');
+      const configPath = CONFIG_PATH;
       const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
       const normalizedUrl = (full_url || '').toLowerCase().replace(/^https?:\/\//, '').split('?')[0].split('#')[0].replace(/\/$/, '');
       category = config.category_map?.[domain] || config.category_map?.[normalizedUrl] || 'manual';
@@ -524,7 +529,7 @@ app.delete('/api/machines/:id', async (req, res) => {
  * with violation aggregates from the logs table.
  */
 app.get('/api/enforcement', async (req, res) => {
-  const configPath = path.join(__dirname, 'config.json');
+  const configPath = CONFIG_PATH;
 
   let config;
   let lastSyncedAt = null;
@@ -689,11 +694,11 @@ app.post('/api/enforcement/mark-blocked', async (req, res) => {
 
 // ─── Enforcement config mutation helpers ───────────────────────────────────
 function readConfig() {
-  const configPath = path.join(__dirname, 'config.json');
+  const configPath = CONFIG_PATH;
   return JSON.parse(fs.readFileSync(configPath, 'utf8'));
 }
 function writeConfig(config) {
-  const configPath = path.join(__dirname, 'config.json');
+  const configPath = CONFIG_PATH;
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
 }
 
@@ -874,7 +879,7 @@ app.delete('/api/enforcement/categories/:name', (req, res) => {
  * Endpoint to serve global extension config
  */
 app.get('/api/config', (req, res) => {
-  const configPath = path.join(__dirname, 'config.json');
+  const configPath = CONFIG_PATH;
   fs.readFile(configPath, 'utf8', (err, data) => {
     if (err) {
       return res.status(500).json({ error: 'Failed to read config' });
@@ -1831,7 +1836,7 @@ const CORE_CATEGORY_PRESETS = {
  */
 async function syncBlacklists() {
   console.log('[SYNC] Starting multi-category blacklist sync...');
-  const configPath = path.join(__dirname, 'config.json');
+  const configPath = CONFIG_PATH;
   
   try {
     if (!fs.existsSync(configPath)) return;
