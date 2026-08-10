@@ -9,6 +9,10 @@ const COLLECTOR_ORIGIN = process.env.COLLECTOR_ORIGIN || "http://127.0.0.1:4448"
 const nextConfig: NextConfig = {
   // Emit a self-contained server bundle (.next/standalone) for a lean Docker image.
   output: "standalone",
+  // Served under /webmon behind the itam-prod reverse proxy. basePath prefixes
+  // the app's pages, static assets, and the rewrite sources below, so the
+  // collector still receives its paths at root (/api, /logs, …).
+  basePath: "/webmon",
   allowedDevOrigins: ["messageboard-svr-dgt1-1.prod.letsdowonders.io"],
 
   // Single-origin proxy: the browser (and, after repacking, the extension) talk

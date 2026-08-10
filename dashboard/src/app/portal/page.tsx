@@ -152,7 +152,7 @@ function LoginForm({ onLogin }: { onLogin: (token: string, user: any) => void })
   // Same-origin: the collector is reached through the Next.js rewrites in
   // next.config.ts (/api, /logs, /ping, /updates -> in-container :4448), so the
   // browser never needs a separate host/port. Empty base => relative URLs.
-  const getBaseUrl = () => '';
+  const getBaseUrl = () => '/webmon';
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -297,7 +297,7 @@ function PortalDashboard({ token, user, onLogout }: { token: string; user: any; 
   // Same-origin: the collector is reached through the Next.js rewrites in
   // next.config.ts (/api, /logs, /ping, /updates -> in-container :4448), so the
   // browser never needs a separate host/port. Empty base => relative URLs.
-  const getBaseUrl = () => '';
+  const getBaseUrl = () => '/webmon';
 
   useEffect(() => {
     const saved = localStorage.getItem('tarro-theme') as 'light' | 'dark';
@@ -1281,7 +1281,7 @@ function ChangePasswordScreen({ token, user, onDone }: { token: string; user: an
   // Same-origin: the collector is reached through the Next.js rewrites in
   // next.config.ts (/api, /logs, /ping, /updates -> in-container :4448), so the
   // browser never needs a separate host/port. Empty base => relative URLs.
-  const getBaseUrl = () => '';
+  const getBaseUrl = () => '/webmon';
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();

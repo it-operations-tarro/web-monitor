@@ -400,7 +400,7 @@ export default function Dashboard() {
   // Same-origin: the collector is reached through the Next.js rewrites in
   // next.config.ts (/api, /logs, /ping, /updates -> in-container :4448), so the
   // browser never needs a separate host/port. Empty base => relative URLs.
-  const getBaseUrl = () => '';
+  const getBaseUrl = () => '/webmon';
 
   async function fetchData(manual = false) {
     if (manual) setRefreshing(true);
