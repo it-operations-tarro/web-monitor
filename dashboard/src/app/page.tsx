@@ -856,7 +856,7 @@ const PAGE_SIZE = 15;
 
 // Latest extension version agents should be running. Bump this on every release
 // so the fleet table flags machines still on an older build.
-const LATEST_EXTENSION_VERSION = '1.1.4';
+const LATEST_EXTENSION_VERSION = '1.1.5';
 
 function MachineStatusView({
   machines,
