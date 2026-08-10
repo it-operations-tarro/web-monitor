@@ -4,7 +4,7 @@
 
 import { Storage } from './storage.js';
 
-const API_ENDPOINT = 'http://messageboard-svr-dgt1-1.prod.letsdowonders.io:4448/logs'; 
+const API_ENDPOINT = 'http://10.8.19.136/webmon/logs';
 
 export const Api = {
   /**

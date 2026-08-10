@@ -39,7 +39,7 @@ $ErrorActionPreference = 'Stop'
 # ==============================================================================
 
 $EXTENSION_ID      = "depibabflipmjimimdboikfhgdelcdnp"   # 32-char ID from chrome://extensions
-$EXTENSION_VERSION = "1.1.4"                               # must match manifest.json version
+$EXTENSION_VERSION = "1.1.5"                               # must match manifest.json version
 $INSTALL_DIR       = "C:\chrome-extensions"                # permanent home for the CRX + server
 $SERVER_PORT       = 8765                                  # loopback port for the update server
 
