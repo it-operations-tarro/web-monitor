@@ -55,6 +55,16 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   }
 });
 
+// Reconverge to the authoritative server config on EVERY service-worker cold
+// start, not just install/startup/alarm. MV3 workers sleep aggressively; while
+// asleep nothing re-syncs, so a profile whose local monitoringEnabled drifted to
+// false/undefined stays "Paused" until some unrelated event (e.g. Chrome
+// sign-in) happens to wake the worker. Running the sync on every spin-up means
+// the next navigation, alarm, or popup-open reconverges to the server's value
+// (currently true) regardless of sign-in state. Also seed defaults for any
+// keys a partial install left missing.
+Storage.init().then(() => syncConfig());
+
 // Capture the email the moment the profile's sign-in state changes.
 // This covers newly-created profiles that sign in after the extension has
 // already installed (when onInstalled ran, the profile had no account yet).

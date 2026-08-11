@@ -15,6 +15,6 @@
   <app appid='YOUR_EXTENSION_ID'>
     <updatecheck
       codebase='https://YOUR_HTTPS_HOST/updates/agent-monitor.crx'
-      version='1.1.5' />
+      version='1.1.8' />
   </app>
 </gupdate>

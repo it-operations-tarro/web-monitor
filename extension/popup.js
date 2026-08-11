@@ -20,9 +20,23 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Load effective settings (including Managed IT values)
   let settings = await Storage.getSettings();
-  
+
   // Update status immediately (even on lock screen)
   updateStatusLabel(settings.monitoringEnabled);
+
+  // Opening the popup wakes the service worker; use that moment to pull a fresh
+  // config from the server so the badge reflects the authoritative state rather
+  // than a possibly-stale local value. This is what breaks the "stays Paused
+  // until you sign into Chrome" behavior — the sync no longer waits for an
+  // unrelated wake event. Falls back silently to the local value if offline.
+  chrome.runtime.sendMessage({ action: 'forceSync' }, async () => {
+    if (chrome.runtime.lastError) return; // worker unavailable / offline
+    settings = await Storage.getSettings();
+    updateStatusLabel(settings.monitoringEnabled);
+    if (settingsContainer.style.display === 'block') {
+      monitoringToggle.checked = settings.monitoringEnabled;
+    }
+  });
 
   // Handle Unlock
   unlockBtn.addEventListener('click', () => {

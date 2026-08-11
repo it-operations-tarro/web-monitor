@@ -22,8 +22,15 @@ const DEFAULT_CONFIG = {
 export const Storage = {
   async init() {
     const data = await chrome.storage.local.get(null);
-    if (Object.keys(data).length === 0) {
-      await chrome.storage.local.set(DEFAULT_CONFIG);
+    // Seed any missing keys, not just when storage is completely empty. A
+    // partially-populated store (e.g. after an upgrade) would otherwise leave
+    // monitoringEnabled undefined, which reads as "Paused" until a sync runs.
+    const missing = {};
+    for (const [key, value] of Object.entries(DEFAULT_CONFIG)) {
+      if (data[key] === undefined) missing[key] = value;
+    }
+    if (Object.keys(missing).length > 0) {
+      await chrome.storage.local.set(missing);
     }
   },
 
@@ -51,6 +58,10 @@ export const Storage = {
     // 3. Merge: Managed IT Policy values override local user settings
     return {
       ...local,
+      // Default a missing monitoringEnabled to true so an unseeded install (or
+      // a stalled config sync) doesn't silently read as "Paused". An explicit
+      // false is preserved.
+      monitoringEnabled: local.monitoringEnabled !== undefined ? local.monitoringEnabled : true,
       machineId: managed.machineId || local.machineId,
       blacklist: managed.blacklist || local.blacklist,
       violationAction: managed.violationAction || local.violationAction,
