@@ -538,6 +538,97 @@ echo "🔄 Restarting Chrome to apply new policies..."
 pkill -f "google-chrome\|chromium" 2>/dev/null || true
 sleep 2
 
+# ------------------------------------------------------------------------------
+# FULL PROFILE WIPE  (runs on EVERY deploy)
+# ⚠️  Destroys ALL Chrome profile data on the machine — bookmarks, saved
+# passwords, sessions, autofill — for every user. Fresh profiles are created
+# on next launch and the forcelist installs the current extension cleanly.
+# This guarantees old profiles can never pin a stale extension version.
+# ------------------------------------------------------------------------------
+echo "⚠️  Deleting ALL Chrome/Chromium profiles on this machine..."
+sudo rm -rf /home/*/.config/google-chrome \
+            /home/*/.config/chromium \
+            /home/*/.config/chromium-browser \
+            /home/*/snap/chromium/common/chromium \
+            /root/.config/google-chrome
+echo "   💥 Profiles removed — fresh profiles will be created on next Chrome launch"
+
+# ------------------------------------------------------------------------------
+# EVICT STALE PROFILE COPIES
+# A profile that already holds an older build keeps running it until Chrome's
+# periodic (~5 h) update check — and some old profiles pin a stale update URL
+# and never move at all. Chrome caches each installed build in a
+# "<version>_0" subfolder; while Chrome is stopped, delete any profile copy
+# that is NOT the current version. On relaunch the forcelist policy makes
+# Chrome re-fetch the CRX from the local update server, cleanly installing
+# the new build in every profile.
+# ------------------------------------------------------------------------------
+echo "🧹 Evicting stale extension copies from existing Chrome profiles..."
+
+EVICTED=0
+for ext_dir in /home/*/.config/google-chrome/*/Extensions/"$EXTENSION_ID" \
+               /home/*/.config/chromium/*/Extensions/"$EXTENSION_ID" \
+               /home/*/.config/chromium-browser/*/Extensions/"$EXTENSION_ID" \
+               /home/*/snap/chromium/common/chromium/*/Extensions/"$EXTENSION_ID" \
+               /root/.config/google-chrome/*/Extensions/"$EXTENSION_ID"; do
+    [ -d "$ext_dir" ] || continue
+    if [ -d "$ext_dir/${EXTENSION_VERSION}_0" ]; then
+        echo "   ✅ Already current: $ext_dir"
+        continue
+    fi
+    sudo rm -rf "$ext_dir"
+    echo "   ♻️  Evicted stale copy: $ext_dir"
+    EVICTED=$((EVICTED + 1))
+done
+[ "$EVICTED" -eq 0 ] && echo "   (no stale copies found)"
+
+# ------------------------------------------------------------------------------
+# PURGE THE EXTENSION'S RECORDED STATE FROM PROFILE PREFERENCES
+# Evicting the cached copy is not always enough: the profile's Preferences /
+# Secure Preferences remember the extension's install metadata — including the
+# update URL it was ORIGINALLY installed from. A profile installed in the old
+# on-prem era keeps checking that stale URL and never picks up the new build.
+# Removing the extension's settings entry makes Chrome treat it as
+# never-installed, so the forcelist performs a clean install from the current
+# local update server. Extension-scoped only — user data is untouched.
+# ------------------------------------------------------------------------------
+echo "🧽 Purging stale extension state from profile Preferences..."
+sudo python3 - "$EXTENSION_ID" << 'PURGE_EOF'
+import json, glob, sys
+ext_id = sys.argv[1]
+patterns = (
+    '/home/*/.config/google-chrome/*/Preferences',
+    '/home/*/.config/google-chrome/*/Secure Preferences',
+    '/home/*/.config/chromium/*/Preferences',
+    '/home/*/.config/chromium/*/Secure Preferences',
+    '/home/*/snap/chromium/common/chromium/*/Preferences',
+    '/home/*/snap/chromium/common/chromium/*/Secure Preferences',
+    '/root/.config/google-chrome/*/Preferences',
+    '/root/.config/google-chrome/*/Secure Preferences',
+)
+for pat in patterns:
+    for path in glob.glob(pat):
+        try:
+            with open(path) as f:
+                prefs = json.load(f)
+            changed = False
+            settings = prefs.get('extensions', {}).get('settings', {})
+            if ext_id in settings:
+                del settings[ext_id]
+                changed = True
+            macs = prefs.get('protection', {}).get('macs', {}) \
+                        .get('extensions', {}).get('settings', {})
+            if ext_id in macs:
+                del macs[ext_id]
+                changed = True
+            if changed:
+                with open(path, 'w') as f:
+                    json.dump(prefs, f, separators=(',', ':'))
+                print(f'   \U0001f9fd Purged stale state: {path}')
+        except Exception:
+            pass
+PURGE_EOF
+
 LOGGED_USER=$(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $3}' | head -1)
 if [ -n "$LOGGED_USER" ] && [ -n "$CHROME_BINARY" ]; then
     sudo -u "$LOGGED_USER" \

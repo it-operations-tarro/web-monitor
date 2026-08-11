@@ -28,7 +28,10 @@
 #>
 
 param(
-    [string]$CrxPath = ""
+    [string]$CrxPath = "",
+    # ⚠️ Deletes ALL Chrome profiles (bookmarks, passwords, sessions) so fresh
+    # profiles force-install the current extension cleanly. Explicit opt-in only.
+    [switch]$WipeProfiles
 )
 
 Set-StrictMode -Version Latest
@@ -418,6 +421,35 @@ foreach ($proc in @('chrome')) {
     if (Get-Process -Name $proc -ErrorAction SilentlyContinue) {
         $wasRunning = $true
         Stop-Process -Name $proc -Force -ErrorAction SilentlyContinue
+    }
+}
+Start-Sleep -Seconds 2
+
+# Optional full profile wipe (-WipeProfiles). Destroys ALL Chrome user data on
+# the machine; fresh profiles are created on next launch and the forcelist
+# installs the current extension cleanly. Explicit opt-in only.
+if ($WipeProfiles) {
+    Write-Warn "-WipeProfiles: deleting ALL Chrome profiles on this machine..."
+    Get-ChildItem "C:\Users\*\AppData\Local\Google\Chrome\User Data" -ErrorAction SilentlyContinue |
+        ForEach-Object { Remove-Item -Path $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
+    Write-OK "Profiles removed -- fresh profiles will be created on next Chrome launch"
+}
+
+# Evict stale extension copies from every Chrome profile. A profile holding an
+# older build keeps running it until Chrome's periodic update check (and some
+# old profiles pin a stale update URL and never move). Chrome caches each build
+# in a "<version>_0" subfolder -- while Chrome is stopped, delete any profile
+# copy that is NOT the current version; the forcelist policy makes Chrome
+# re-fetch the current CRX from the local server on relaunch.
+Write-Host "  Evicting stale extension copies from existing profiles..." -ForegroundColor Cyan
+$staleDirs = Get-ChildItem -Path "C:\Users\*\AppData\Local\Google\Chrome\User Data\*\Extensions\$EXTENSION_ID" `
+                           -Directory -ErrorAction SilentlyContinue
+foreach ($d in $staleDirs) {
+    if (Test-Path (Join-Path $d.FullName "${EXTENSION_VERSION}_0")) {
+        Write-OK "Already current: $($d.FullName)"
+    } else {
+        Remove-Item -Path $d.FullName -Recurse -Force -ErrorAction SilentlyContinue
+        Write-OK "Evicted stale copy: $($d.FullName)"
     }
 }
 
