@@ -533,10 +533,30 @@ echo "   ✅ Watchdog timer enabled (checks every 60 s)"
 # ==============================================================================
 
 echo ""
-echo "🔄 Restarting Chrome to apply new policies..."
+echo "🔪 Stopping ALL Chrome/Chromium sessions (must be fully down for the profile"
+echo "    wipe below to take effect — a surviving process re-writes profile files)..."
 
-pkill -f "google-chrome\|chromium" 2>/dev/null || true
-sleep 2
+# Kill by process NAME, not -f path matching: the browser runs as
+# /opt/google/chrome/chrome (comm 'chrome'), so a "google-chrome" -f pattern
+# misses it. This matches the main process, all renderers/GPU/crashpad helpers,
+# and every user's session. Escalate SIGTERM -> SIGKILL until nothing survives.
+for attempt in 1 2 3; do
+    pkill -TERM chrome    2>/dev/null || true
+    pkill -TERM chromium  2>/dev/null || true
+    sleep 2
+    pgrep chrome >/dev/null 2>&1 || pgrep chromium >/dev/null 2>&1 || break
+    echo "   … still alive, escalating to SIGKILL (attempt $attempt)"
+    pkill -KILL chrome    2>/dev/null || true
+    pkill -KILL chromium  2>/dev/null || true
+    sleep 1
+done
+if pgrep chrome >/dev/null 2>&1 || pgrep chromium >/dev/null 2>&1; then
+    echo "   ⚠️  Some Chrome processes survived — wipe may be incomplete:"
+    pgrep -a chrome 2>/dev/null; pgrep -a chromium 2>/dev/null
+else
+    echo "   ✅ All Chrome/Chromium sessions stopped"
+fi
+sleep 1
 
 # ------------------------------------------------------------------------------
 # FULL PROFILE WIPE  (runs on EVERY deploy)
