@@ -54,6 +54,17 @@ if (!JWT_SECRET) {
 const app = express();
 const PORT = process.env.PORT || 4448;
 
+// Behind a reverse proxy (nginx → Next.js rewrites → here) every request
+// arrives from loopback, so req.ip would record 127.0.0.1 for every machine.
+// Trusting the proxy chain makes req.ip resolve to the left-most entry of
+// X-Forwarded-For — the agent's real address. TRUST_PROXY accepts any value
+// Express supports ('true', a hop count, or a subnet/IP list); it is off by
+// default so a directly-exposed collector can't be spoofed via a forged header.
+if (process.env.TRUST_PROXY) {
+  const tp = process.env.TRUST_PROXY;
+  app.set('trust proxy', tp === 'true' ? true : (/^\d+$/.test(tp) ? parseInt(tp, 10) : tp));
+}
+
 // Slack incoming-webhook for violation notifications.
 // The channel is determined by the webhook itself (set in Slack when you create it).
 // Leave unset to disable notifications.
