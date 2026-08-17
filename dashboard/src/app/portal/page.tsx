@@ -152,7 +152,7 @@ function LoginForm({ onLogin }: { onLogin: (token: string, user: any) => void })
   // Same-origin: the collector is reached through the Next.js rewrites in
   // next.config.ts (/api, /logs, /ping, /updates -> in-container :4448), so the
   // browser never needs a separate host/port. Empty base => relative URLs.
-  const getBaseUrl = () => '/webmon';
+  const getBaseUrl = () => '';
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -190,7 +190,7 @@ function LoginForm({ onLogin }: { onLogin: (token: string, user: any) => void })
         <div className="flex items-center gap-3 mb-8 justify-center">
           <div className="relative">
             <div className="absolute inset-0 rounded-xl bg-[#6a29e1]/30 blur-md" />
-            <img src="/webmon/logo.jpg" alt="Tarro" className="relative w-10 h-10 rounded-xl object-cover ring-1 ring-[#6a29e1]/50" />
+            <img src="/logo.jpg" alt="Tarro" className="relative w-10 h-10 rounded-xl object-cover ring-1 ring-[#6a29e1]/50" />
           </div>
           <div>
             <div className="text-base font-bold tracking-tight text-[var(--text-main)]">Tarro</div>
@@ -297,7 +297,7 @@ function PortalDashboard({ token, user, onLogout }: { token: string; user: any; 
   // Same-origin: the collector is reached through the Next.js rewrites in
   // next.config.ts (/api, /logs, /ping, /updates -> in-container :4448), so the
   // browser never needs a separate host/port. Empty base => relative URLs.
-  const getBaseUrl = () => '/webmon';
+  const getBaseUrl = () => '';
 
   useEffect(() => {
     const saved = localStorage.getItem('tarro-theme') as 'light' | 'dark';
@@ -493,7 +493,7 @@ function PortalDashboard({ token, user, onLogout }: { token: string; user: any; 
       <header className="sticky top-0 z-40 bg-[var(--bg-sidebar)]/90 backdrop-blur-md border-b border-[var(--border-ui)] px-6 py-3 flex items-center justify-between gap-4">
         <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#6a29e1]/50 to-transparent" />
         <div className="flex items-center gap-3">
-          <img src="/webmon/logo.jpg" alt="Tarro" className="w-7 h-7 rounded object-cover ring-1 ring-[var(--border-ui)]" />
+          <img src="/logo.jpg" alt="Tarro" className="w-7 h-7 rounded object-cover ring-1 ring-[var(--border-ui)]" />
           <div className="leading-tight">
             <span className="text-sm font-semibold text-[var(--text-main)]">Tarro Portal</span>
             <span className="ml-2 text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Team View</span>
@@ -1281,7 +1281,7 @@ function ChangePasswordScreen({ token, user, onDone }: { token: string; user: an
   // Same-origin: the collector is reached through the Next.js rewrites in
   // next.config.ts (/api, /logs, /ping, /updates -> in-container :4448), so the
   // browser never needs a separate host/port. Empty base => relative URLs.
-  const getBaseUrl = () => '/webmon';
+  const getBaseUrl = () => '';
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1313,7 +1313,7 @@ function ChangePasswordScreen({ token, user, onDone }: { token: string; user: an
     <div className="min-h-screen bg-[var(--bg-page)] flex items-center justify-center px-4">
       <div className="w-full max-w-sm">
         <div className="flex items-center gap-3 mb-8 justify-center">
-          <img src="/webmon/logo.jpg" alt="Tarro" className="w-9 h-9 rounded-md object-cover ring-1 ring-[var(--border-ui)]" />
+          <img src="/logo.jpg" alt="Tarro" className="w-9 h-9 rounded-md object-cover ring-1 ring-[var(--border-ui)]" />
           <div>
             <div className="text-base font-semibold text-[var(--text-main)]">Tarro</div>
             <div className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-muted)]">Team Portal</div>

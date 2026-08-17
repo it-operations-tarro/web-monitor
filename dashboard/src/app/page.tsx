@@ -210,7 +210,7 @@ function LoadingScreen() {
           </div>
           {/* Logo */}
           <div className="relative z-10 w-16 h-16 rounded-2xl bg-gradient-to-br from-[#6a29e1] to-[#3b2470] flex items-center justify-center shadow-2xl shadow-[#6a29e1]/40 ring-1 ring-[#6a29e1]/60">
-            <img src="/webmon/logo.jpg" alt="Tarro" className="w-14 h-14 rounded-xl object-cover" />
+            <img src="/logo.jpg" alt="Tarro" className="w-14 h-14 rounded-xl object-cover" />
           </div>
         </div>
 
@@ -400,7 +400,7 @@ export default function Dashboard() {
   // Same-origin: the collector is reached through the Next.js rewrites in
   // next.config.ts (/api, /logs, /ping, /updates -> in-container :4448), so the
   // browser never needs a separate host/port. Empty base => relative URLs.
-  const getBaseUrl = () => '/webmon';
+  const getBaseUrl = () => '';
 
   async function fetchData(manual = false) {
     if (manual) setRefreshing(true);
@@ -492,7 +492,7 @@ export default function Dashboard() {
 
         <div className="px-5 py-5 border-b border-[var(--border-ui)] flex items-center gap-3">
           <div className="relative">
-            <img src="/webmon/logo.jpg" alt="Tarro" className="w-9 h-9 rounded-lg object-cover ring-1 ring-[#6a29e1]/40 shadow-md shadow-[#6a29e1]/20" />
+            <img src="/logo.jpg" alt="Tarro" className="w-9 h-9 rounded-lg object-cover ring-1 ring-[#6a29e1]/40 shadow-md shadow-[#6a29e1]/20" />
           </div>
           <div className="leading-tight">
             <div className="text-sm font-bold tracking-tight text-[var(--text-main)]">Tarro</div>
