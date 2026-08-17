@@ -4,7 +4,10 @@
 
 import { Storage } from './storage.js';
 
-const API_ENDPOINT = 'http://10.8.19.136/webmon/logs';
+// Fargate service behind its own internal load balancer. Served at ROOT (the
+// /webmon prefix belonged to the old shared nginx proxy on the ITAM server).
+// /ping and /api/config are derived from this by replacing the /logs suffix.
+const API_ENDPOINT = 'http://internal-itops-webmon-alb-1401027685.ap-southeast-1.elb.amazonaws.com/logs';
 
 export const Api = {
   /**

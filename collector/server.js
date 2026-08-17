@@ -1907,9 +1907,22 @@ async function syncBlacklists() {
       console.log(`[SYNC] Added Adult Preset (${ADULT_PRESET.length} domains)`);
     }
 
-    // 5. Fetch external categories from GitHub
+    // 5. Fetch external categories from GitHub.
+    //
+    // The blacklist is rebuilt from scratch every run, so a transient upstream
+    // failure (e.g. HTTP 429 rate limiting) would silently drop that category's
+    // domains and the write below would PERSIST the loss — gutting enforcement
+    // from ~185k domains to just the local presets. On failure we therefore
+    // carry over the domains this category contributed last run, taken from the
+    // previous category_map, and remember that the run was incomplete.
+    const prevBlacklist   = new Set(config.blacklist || []);
+    const prevCategoryMap = config.category_map || {};
+    let remoteAttempted = 0;
+    let remoteFailed    = 0;
+
     for (const cat of (config.categories || [])) {
       if (CATEGORY_URLS[cat]) {
+        remoteAttempted++;
         try {
           const data = await fetchExternalList(CATEGORY_URLS[cat]);
           data.forEach(domain => {
@@ -1919,7 +1932,17 @@ async function syncBlacklists() {
           });
           console.log(`[SYNC] Successfully synced category: ${cat} (${data.length} domains)`);
         } catch (e) {
-          console.error(`[SYNC] Failed to sync category ${cat}:`, e.message);
+          remoteFailed++;
+          let carried = 0;
+          for (const [domain, mapped] of Object.entries(prevCategoryMap)) {
+            if (mapped === cat && prevBlacklist.has(domain)) {
+              newBlacklist.add(domain);
+              if (!categoryMap[domain]) categoryMap[domain] = cat;
+              carried++;
+            }
+          }
+          console.error(`[SYNC] Failed to sync category ${cat}: ${e.message}` +
+                        ` — retained ${carried} previously known domains`);
         }
       }
     }
@@ -1936,11 +1959,25 @@ async function syncBlacklists() {
       categoryMap[domain] = cat;
     });
 
+    // Second safety net: if EVERY remote category failed and the result would
+    // still be smaller than what we already had (e.g. no usable previous
+    // category_map to carry over from), keep the existing config rather than
+    // persisting a gutted blacklist. Enforcement stays intact until upstream
+    // recovers and a later run can sync cleanly.
+    if (remoteAttempted > 0 && remoteFailed === remoteAttempted &&
+        newBlacklist.size < prevBlacklist.size) {
+      console.error(`[SYNC] ABORTED WRITE — all ${remoteFailed} remote categories failed;` +
+                    ` result (${newBlacklist.size}) is smaller than the current list` +
+                    ` (${prevBlacklist.size}). Existing blacklist left untouched.`);
+      return;
+    }
+
     // Update config with the expanded list and category map
     config.blacklist = Array.from(newBlacklist);
     config.category_map = categoryMap;
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-    console.log(`[SYNC] Complete. Total blocked domains: ${config.blacklist.length}`);
+    console.log(`[SYNC] Complete. Total blocked domains: ${config.blacklist.length}` +
+                (remoteFailed ? ` (${remoteFailed}/${remoteAttempted} remote categories failed — carried over)` : ''));
   } catch (e) {
     console.error('[SYNC] Global sync failure:', e.message);
   }
