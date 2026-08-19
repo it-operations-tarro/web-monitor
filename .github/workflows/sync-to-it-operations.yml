@@ -1,0 +1,73 @@
+# Mirrors this repository into the web-monitor/ folder of kjt01/it-operations.
+#
+# This repo stays the single source of truth: you keep committing and pushing
+# here, and every push to main is copied into the other repo's subfolder within
+# about a minute.
+#
+# ONE-WAY AND DESTRUCTIVE: the copy uses rsync --delete, so anything edited
+# directly in it-operations/web-monitor/ is overwritten on the next sync. Treat
+# that folder as read-only.
+#
+# SETUP (once):
+#   1. Create a fine-grained personal access token with
+#        Repository access: kjt01/it-operations
+#        Permissions:       Contents -> Read and write
+#   2. Add it here as a repository secret named IT_OPERATIONS_TOKEN
+#        Settings -> Secrets and variables -> Actions -> New repository secret
+#
+# Nothing secret is copied: .gitignore already excludes .env, config.json, the
+# archives, and the extension signing key, so only tracked files are mirrored.
+
+name: Sync to it-operations
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:        # allows a manual run from the Actions tab
+
+# Queue runs rather than racing: two pushes in quick succession would otherwise
+# both try to push to the destination and one would be rejected.
+concurrency:
+  group: sync-to-it-operations
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out this repository
+        uses: actions/checkout@v4
+        with:
+          path: source
+
+      - name: Check out it-operations
+        uses: actions/checkout@v4
+        with:
+          repository: kjt01/it-operations
+          token: ${{ secrets.IT_OPERATIONS_TOKEN }}
+          path: target
+
+      - name: Copy tree into web-monitor/
+        run: |
+          # Refuse to sync an empty checkout — a bad copy with --delete would
+          # otherwise wipe the destination folder.
+          if [ -z "$(ls -A source)" ]; then
+            echo "::error::source checkout is empty, refusing to sync"
+            exit 1
+          fi
+          mkdir -p target/web-monitor
+          rsync -a --delete --exclude '.git' source/ target/web-monitor/
+
+      - name: Commit and push if anything changed
+        working-directory: target
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add web-monitor
+          if git diff --cached --quiet; then
+            echo "No changes to sync."
+          else
+            git commit -m "sync web-monitor @ ${GITHUB_SHA::7}"
+            git push
+            echo "Synced ${GITHUB_SHA::7} to kjt01/it-operations:web-monitor/"
+          fi

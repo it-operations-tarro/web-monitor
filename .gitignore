@@ -18,3 +18,8 @@ collector/archives/
 # AWS CLI installer artifacts
 aws/
 awscliv2.zip
+
+# Chrome extension signing key — NEVER commit (fixes the extension ID;
+# whoever holds it can sign a build our fleet force-installs)
+extension.pem
+*.pem
